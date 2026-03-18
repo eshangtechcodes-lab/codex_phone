@@ -330,8 +330,9 @@ setTimeout(() => {
 import TelegramBot from 'node-telegram-bot-api';
 
 const TG_TOKEN = '8783767689:AAFXHLR_GxnC_RecnWOPGtiizuXr1NGmoOA';
-let tgModel = 'gpt-5.4-mini'; // Telegram 默认模型
-const tgThreads = new Map();  // userId -> threadId（会话持久化）
+let tgModel = 'gpt-5.4-mini'; // Codex 默认模型
+const tgThreads = new Map();  // userId -> threadId
+const tgEngine = new Map();   // userId -> 'codex' | 'gemini'
 
 const bot = new TelegramBot(TG_TOKEN, { polling: true });
 
@@ -339,15 +340,30 @@ bot.on('polling_error', (err) => console.log('[TG] Polling error:', err.message)
 
 // /start 命令
 bot.onText(/\/start/, (msg) => {
+    const engine = tgEngine.get(msg.from.id) || 'codex';
     bot.sendMessage(msg.chat.id,
-        '🤖 *Codex Bot* 已上线！\n\n' +
-        '直接发消息即可与 Codex 对话。\n\n' +
+        '🤖 *AI Bot* 已上线！\n\n' +
+        `当前引擎: *${engine.toUpperCase()}*\n\n` +
         '命令：\n' +
+        '/codex — 切到 Codex（能执行代码）\n' +
+        '/gemini — 切到 Gemini（多模态、免费）\n' +
         '/new — 新建会话\n' +
-        '/model — 切换模型\n' +
+        '/model — 切换 Codex 模型\n' +
         '/quota — 查看额度',
         { parse_mode: 'Markdown' }
     );
+});
+
+// /codex 切换引擎
+bot.onText(/\/codex/, (msg) => {
+    tgEngine.set(msg.from.id, 'codex');
+    bot.sendMessage(msg.chat.id, '🟢 已切换到 *Codex* 引擎（GPT-5.4，能执行代码）', { parse_mode: 'Markdown' });
+});
+
+// /gemini 切换引擎
+bot.onText(/\/gemini/, (msg) => {
+    tgEngine.set(msg.from.id, 'gemini');
+    bot.sendMessage(msg.chat.id, '🔵 已切换到 *Gemini* 引擎（Gemini 3 Flash，多模态）', { parse_mode: 'Markdown' });
 });
 
 // /new 新建会话
@@ -356,16 +372,16 @@ bot.onText(/\/new/, (msg) => {
     bot.sendMessage(msg.chat.id, '✅ 已开始新会话');
 });
 
-// /model 切换模型
+// /model 切换 Codex 模型
 bot.onText(/\/model\s*(.*)/, (msg, match) => {
     const models = ['gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex', 'gpt-5.2-codex', 'gpt-5.2', 'gpt-5.1-codex-max', 'gpt-5.1-codex-mini'];
     const input = (match[1] || '').trim();
     if (input && models.includes(input)) {
         tgModel = input;
-        bot.sendMessage(msg.chat.id, `✅ 模型已切换为: *${tgModel}*`, { parse_mode: 'Markdown' });
+        bot.sendMessage(msg.chat.id, `✅ Codex 模型切换为: *${tgModel}*`, { parse_mode: 'Markdown' });
     } else {
         bot.sendMessage(msg.chat.id,
-            `当前模型: *${tgModel}*\n\n可选模型：\n${models.map(m => `\`/model ${m}\``).join('\n')}`,
+            `当前 Codex 模型: *${tgModel}*\n\n可选：\n${models.map(m => `\`/model ${m}\``).join('\n')}`,
             { parse_mode: 'Markdown' }
         );
     }
@@ -393,26 +409,68 @@ bot.onText(/\/quota/, async (msg) => {
     }
 });
 
-// 普通消息 → Codex 对话
+// --- Gemini 调用（通过 CLI） ---
+function geminiChat(message) {
+    return new Promise((resolve, reject) => {
+        const proc = spawn('gemini', ['-p', message, '--output-format', 'json'], {
+            shell: true,
+            timeout: 120000
+        });
+        let stdout = '';
+        let stderr = '';
+        proc.stdout.on('data', d => { stdout += d.toString(); });
+        proc.stderr.on('data', d => { stderr += d.toString(); });
+        proc.on('close', (code) => {
+            if (code !== 0) {
+                return reject(new Error(stderr || `Gemini exited with code ${code}`));
+            }
+            try {
+                const data = JSON.parse(stdout);
+                resolve(data.response || '(empty)');
+            } catch {
+                // JSON 解析失败，直接返回原始输出
+                resolve(stdout.trim() || '(empty)');
+            }
+        });
+        proc.on('error', reject);
+    });
+}
+
+// 图片/语音/文件提示
+bot.on('photo', (msg) => {
+    bot.sendMessage(msg.chat.id, '📷 暂不支持图片识别（Gemini CLI 不支持传图）。\n请用文字描述图片内容，我来帮你分析！');
+});
+
+bot.on('voice', (msg) => {
+    bot.sendMessage(msg.chat.id, '🎤 暂不支持语音识别，请发文字消息。');
+});
+
+// 普通消息 → 按引擎路由
 bot.on('message', async (msg) => {
     if (!msg.text || msg.text.startsWith('/')) return;
 
     const userId = msg.from.id;
-    const threadId = tgThreads.get(userId) || null;
+    const engine = tgEngine.get(userId) || 'codex';
 
-    // 发送"正在思考"状态
     bot.sendChatAction(msg.chat.id, 'typing');
 
     try {
-        const result = await codexChat(msg.text, tgModel, threadId);
-        // 保存 threadId 以维持会话
-        if (result.threadId) tgThreads.set(userId, result.threadId);
-        // 发送回复（Markdown 格式）
-        bot.sendMessage(msg.chat.id, result.reply || '(empty reply)', { parse_mode: 'Markdown' })
-            .catch(() => {
-                // Markdown 解析失败时用纯文本重发
-                bot.sendMessage(msg.chat.id, result.reply || '(empty reply)');
-            });
+        let reply;
+        if (engine === 'gemini') {
+            // Gemini 引擎
+            console.log(`[TG/Gemini] "${msg.text.substring(0, 50)}"`);
+            reply = await geminiChat(msg.text);
+        } else {
+            // Codex 引擎
+            const threadId = tgThreads.get(userId) || null;
+            console.log(`[TG/Codex] "${msg.text.substring(0, 50)}" model=${tgModel}`);
+            const result = await codexChat(msg.text, tgModel, threadId);
+            if (result.threadId) tgThreads.set(userId, result.threadId);
+            reply = result.reply;
+        }
+        // 发送回复
+        bot.sendMessage(msg.chat.id, reply || '(empty reply)', { parse_mode: 'Markdown' })
+            .catch(() => bot.sendMessage(msg.chat.id, reply || '(empty reply)'));
     } catch (e) {
         bot.sendMessage(msg.chat.id, '❌ Error: ' + e.message);
     }
