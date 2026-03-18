@@ -324,9 +324,131 @@ setTimeout(() => {
     });
 }, 2000);
 
+// ================================================================
+// Telegram Bot - 通过 Telegram 聊天使用 Codex
+// ================================================================
+import TelegramBot from 'node-telegram-bot-api';
+
+const TG_TOKEN = '8783767689:AAFXHLR_GxnC_RecnWOPGtiizuXr1NGmoOA';
+let tgModel = 'gpt-5.4-mini'; // Telegram 默认模型
+const tgThreads = new Map();  // userId -> threadId（会话持久化）
+
+const bot = new TelegramBot(TG_TOKEN, { polling: true });
+
+bot.on('polling_error', (err) => console.log('[TG] Polling error:', err.message));
+
+// /start 命令
+bot.onText(/\/start/, (msg) => {
+    bot.sendMessage(msg.chat.id,
+        '🤖 *Codex Bot* 已上线！\n\n' +
+        '直接发消息即可与 Codex 对话。\n\n' +
+        '命令：\n' +
+        '/new — 新建会话\n' +
+        '/model — 切换模型\n' +
+        '/quota — 查看额度',
+        { parse_mode: 'Markdown' }
+    );
+});
+
+// /new 新建会话
+bot.onText(/\/new/, (msg) => {
+    tgThreads.delete(msg.from.id);
+    bot.sendMessage(msg.chat.id, '✅ 已开始新会话');
+});
+
+// /model 切换模型
+bot.onText(/\/model\s*(.*)/, (msg, match) => {
+    const models = ['gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex', 'gpt-5.2-codex', 'gpt-5.2', 'gpt-5.1-codex-max', 'gpt-5.1-codex-mini'];
+    const input = (match[1] || '').trim();
+    if (input && models.includes(input)) {
+        tgModel = input;
+        bot.sendMessage(msg.chat.id, `✅ 模型已切换为: *${tgModel}*`, { parse_mode: 'Markdown' });
+    } else {
+        bot.sendMessage(msg.chat.id,
+            `当前模型: *${tgModel}*\n\n可选模型：\n${models.map(m => `\`/model ${m}\``).join('\n')}`,
+            { parse_mode: 'Markdown' }
+        );
+    }
+});
+
+// /quota 查看额度
+bot.onText(/\/quota/, async (msg) => {
+    try {
+        const result = await quickRpc('account/rateLimits/read', {});
+        const limits = result.rateLimits || {};
+        const p = limits.primary || {};
+        const s = limits.secondary || {};
+        const resetMin = Math.max(0, Math.round((p.resetsAt * 1000 - Date.now()) / 60000));
+        const resetH = Math.floor(resetMin / 60);
+        const resetM = resetMin % 60;
+        bot.sendMessage(msg.chat.id,
+            `📊 *额度信息*\n\n` +
+            `⏱ 5h: 剩余 *${100 - (p.usedPercent || 0)}%* ↻${resetH}h${resetM}m\n` +
+            `📅 Week: 剩余 *${100 - (s.usedPercent || 0)}%*\n` +
+            `📋 Plan: *${limits.planType || 'unknown'}*`,
+            { parse_mode: 'Markdown' }
+        );
+    } catch (e) {
+        bot.sendMessage(msg.chat.id, '❌ 查询额度失败: ' + e.message);
+    }
+});
+
+// 普通消息 → Codex 对话
+bot.on('message', async (msg) => {
+    if (!msg.text || msg.text.startsWith('/')) return;
+
+    const userId = msg.from.id;
+    const threadId = tgThreads.get(userId) || null;
+
+    // 发送"正在思考"状态
+    bot.sendChatAction(msg.chat.id, 'typing');
+
+    try {
+        const result = await codexChat(msg.text, tgModel, threadId);
+        // 保存 threadId 以维持会话
+        if (result.threadId) tgThreads.set(userId, result.threadId);
+        // 发送回复（Markdown 格式）
+        bot.sendMessage(msg.chat.id, result.reply || '(empty reply)', { parse_mode: 'Markdown' })
+            .catch(() => {
+                // Markdown 解析失败时用纯文本重发
+                bot.sendMessage(msg.chat.id, result.reply || '(empty reply)');
+            });
+    } catch (e) {
+        bot.sendMessage(msg.chat.id, '❌ Error: ' + e.message);
+    }
+});
+
+// 辅助：快速 RPC 查询（不走完整对话流程）
+function quickRpc(method, params) {
+    return new Promise((resolve, reject) => {
+        const ws = new WebSocket(CODEX_WS_URL);
+        let id = 1;
+        ws.on('open', () => {
+            ws.send(JSON.stringify({ jsonrpc: '2.0', id: id++, method: 'initialize',
+                params: { clientVersion: '1.0.0', protocolVersion: '2.0',
+                    clientInfo: { name: 'tg-bot', version: '1.0.0' }, capabilities: {} } }));
+        });
+        ws.on('message', d => {
+            const m = JSON.parse(d.toString());
+            if (m.id === 1 && m.result) {
+                ws.send(JSON.stringify({ jsonrpc: '2.0', id: id++, method, params }));
+            }
+            if (m.id === 2) {
+                ws.close();
+                resolve(m.result);
+            }
+        });
+        ws.on('error', e => { reject(e); });
+        setTimeout(() => { ws.close(); reject(new Error('timeout')); }, 5000);
+    });
+}
+
+console.log('[TG] Bot @yskj02_bot started');
+
 // 优雅退出
 process.on('SIGINT', () => {
     console.log('\nShutting down...');
     if (codexProcess) codexProcess.kill();
+    bot.stopPolling();
     process.exit(0);
 });
