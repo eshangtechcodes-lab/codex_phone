@@ -1,0 +1,11 @@
+{
+  "name": "Codex Phone",
+  "short_name": "Codex",
+  "description": "Mobile control panel for Codex CLI",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0d1117",
+  "theme_color": "#0d1117",
+  "icons": []
+}
