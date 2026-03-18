@@ -20,23 +20,29 @@
     <header class="header">
         <div class="header-left">
             <span class="logo">⌘ Codex</span>
+            <button class="hdr-btn" id="newThreadBtn">+ New</button>
+            <div class="thread-dropdown-wrap">
+                <button class="hdr-btn" id="historyBtn">📋</button>
+                <div class="thread-dropdown" id="threadDropdown">
+                    <div class="thread-dropdown-header">Recent Threads</div>
+                    <div class="thread-list" id="threadList"></div>
+                </div>
+            </div>
         </div>
         <div class="header-right">
             <select class="model-select" id="modelSelect">
                 <option value="gpt-5.4">5.4</option>
             </select>
+            <div class="quota-badge" id="quotaBadge" title="Click to refresh">
+                <span class="quota-bar"><span class="quota-fill" id="quotaFill"></span></span>
+                <span class="quota-text" id="quotaText">--</span>
+            </div>
             <div class="status-badge">
                 <div class="status-dot" id="statusDot"></div>
                 <span id="statusText">Connecting...</span>
             </div>
         </div>
     </header>
-
-    <!-- 会话列表（可切换显示） -->
-    <div class="thread-bar" id="threadBar">
-        <button class="thread-tab active" id="newThreadBtn">+ New</button>
-        <div class="thread-list" id="threadList"></div>
-    </div>
 
     <!-- 聊天区域 -->
     <div class="chat-container" id="chatContainer">

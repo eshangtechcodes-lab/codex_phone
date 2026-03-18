@@ -42,6 +42,7 @@ function connect() {
             initialized = true;
             updateStatus(true);
             loadModels();
+            loadQuota();
             loadThreads();
             // 恢复上次会话
             if (currentThreadId) {
@@ -358,12 +359,14 @@ async function sendMessage() {
     // 显示用户消息
     addMessage('user', escapeHtml(text));
 
-    // 如果没有会话，先创建
+    // 如果没有会话，先创建并让 Codex 读取 CODEX.md
+    let isNewThread = false;
     if (!currentThreadId) {
         try {
             const result = await sendRpc('thread/start', { model: selectedModel });
             currentThreadId = result.thread?.id || result.threadId;
             localStorage.setItem('codex_threadId', currentThreadId);
+            isNewThread = true;
             console.log('[THREAD] Auto-created:', currentThreadId);
         } catch (e) {
             addMessage('assistant', `Error starting thread: ${e.message || JSON.stringify(e)}`);
@@ -371,16 +374,81 @@ async function sendMessage() {
         }
     }
 
+    // 新会话：先让 Codex 读 CODEX.md 作为"记忆"
+    const actualInput = isNewThread
+        ? `Please first silently read the file CODEX.md in the current directory for context about me and this project. Do not mention reading the file. Then answer my question:\n\n${text}`
+        : text;
+
     // 发送消息 (turn/start)
     try {
         await sendRpc('turn/start', {
             threadId: currentThreadId,
-            input: [{ type: 'text', text }]
+            input: [{ type: 'text', text: actualInput }]
         });
     } catch (e) {
         addMessage('assistant', `Error: ${e.message || JSON.stringify(e)}`);
     }
 }
+
+// --- Quota Display ---
+const quotaBadge = document.getElementById('quotaBadge');
+const quotaFill = document.getElementById('quotaFill');
+const quotaText = document.getElementById('quotaText');
+
+async function loadQuota() {
+    try {
+        const [limitsResult, accountResult] = await Promise.all([
+            sendRpc('account/rateLimits/read', {}),
+            sendRpc('account/read', {})
+        ]);
+        const limits = limitsResult.rateLimits || {};
+        const account = accountResult.account || {};
+        const used = limits.primary?.usedPercent ?? 0;
+        const remaining = 100 - used;
+
+        // 计算重置倒计时
+        let resetStr = '';
+        if (limits.primary?.resetsAt) {
+            const mins = Math.max(0, Math.round((limits.primary.resetsAt * 1000 - Date.now()) / 60000));
+            if (mins >= 60) {
+                resetStr = ` ↻${Math.floor(mins/60)}h${mins%60 > 0 ? mins%60 + 'm' : ''}`;
+            } else {
+                resetStr = ` ↻${mins}m`;
+            }
+        }
+
+        // 进度条显示剩余
+        quotaFill.style.width = remaining + '%';
+        const plan = (limits.planType || 'unknown').toUpperCase();
+        quotaText.textContent = remaining + '%' + resetStr;
+
+        // 颜色：绿(>60) → 黄(30-60) → 红(<30)
+        if (remaining > 60) {
+            quotaFill.style.background = 'var(--success)';
+            quotaText.style.color = 'var(--success)';
+        } else if (remaining > 30) {
+            quotaFill.style.background = 'var(--warning)';
+            quotaText.style.color = 'var(--warning)';
+        } else {
+            quotaFill.style.background = 'var(--error)';
+            quotaText.style.color = 'var(--error)';
+        }
+
+        // tooltip 显示完整账户信息
+        const weekUsed = limits.secondary?.usedPercent ?? 0;
+        const email = account.email || 'unknown';
+        quotaBadge.title = `📧 ${email}\n📋 Plan: ${plan}\n⏱ 5h: ${remaining}% left${resetStr}\n📅 Week: ${100 - weekUsed}% left`;
+    } catch (e) {
+        console.log('[QUOTA] Failed:', e);
+        quotaText.textContent = '--';
+    }
+}
+
+// 每分钟自动刷新额度
+setInterval(() => { if (initialized) loadQuota(); }, 60000);
+
+// 点击刷新额度
+quotaBadge.addEventListener('click', loadQuota);
 
 async function loadModels() {
     try {
@@ -412,13 +480,16 @@ async function loadThreads() {
         const result = await sendRpc('thread/list', {});
         const threads = result.data || result.threads || [];
         threadList.innerHTML = '';
-        threads.slice(0, 10).forEach(t => {
+        threads.slice(0, 20).forEach(t => {
             const btn = document.createElement('button');
-            btn.className = 'thread-tab';
+            btn.className = 'thread-item';
             btn.textContent = t.preview || t.name || t.title || 'Untitled';
             btn.title = t.id;
             if (t.id === currentThreadId) btn.classList.add('active');
-            btn.onclick = () => resumeThread(t.id);
+            btn.onclick = () => {
+                threadDropdown.classList.remove('open');
+                resumeThread(t.id);
+            };
             threadList.appendChild(btn);
         });
     } catch (e) {
@@ -469,7 +540,7 @@ async function resumeThread(threadId) {
 }
 
 function updateThreadTabs() {
-    document.querySelectorAll('.thread-tab').forEach(btn => {
+    document.querySelectorAll('.thread-item').forEach(btn => {
         btn.classList.toggle('active', btn.title === currentThreadId);
     });
     newThreadBtn.classList.toggle('active', !currentThreadId);
@@ -490,10 +561,28 @@ messageInput.addEventListener('input', function () {
     this.style.height = this.scrollHeight + 'px';
 });
 
+// --- History dropdown ---
+const historyBtn = document.getElementById('historyBtn');
+const threadDropdown = document.getElementById('threadDropdown');
+
+historyBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    threadDropdown.classList.toggle('open');
+    if (threadDropdown.classList.contains('open')) loadThreads();
+});
+
+// 点外部关闭
+document.addEventListener('click', (e) => {
+    if (!e.target.closest('.thread-dropdown-wrap')) {
+        threadDropdown.classList.remove('open');
+    }
+});
+
 newThreadBtn.addEventListener('click', () => {
     currentThreadId = null;
     localStorage.removeItem('codex_threadId');
     clearChat();
+    threadDropdown.classList.remove('open');
     chatContent.innerHTML = `
         <div class="welcome-state">
             <div class="welcome-icon">⌘</div>
