@@ -485,14 +485,8 @@ bot.onText(/\/task\s*(.*)/, async (msg, match) => {
     console.log(`[Task] 新任务: "${task}"`);
     bot.sendMessage(chatId, `🚀 *Task 启动*\n📋 ${task}\n\n_后台执行中，你可以继续聊天..._`, { parse_mode: 'Markdown' });
 
-    // 把任务写入指令文件
-    const promptPath = join(__dirname, '.patrol', 'prompt.md');
-    const fs = await import('fs');
-    fs.default.mkdirSync(join(__dirname, '.patrol'), { recursive: true });
-    fs.default.writeFileSync(promptPath, task, 'utf-8');
-
-    // 异步执行 codex exec
-    taskProc = spawn('codex', ['exec', '-m', 'gpt-5.4-mini', '阅读 .patrol/prompt.md 并按要求执行'], {
+    // 异步执行 codex exec（直接传 prompt，不通过文件）
+    taskProc = spawn('codex', ['exec', '-m', 'gpt-5.4-mini', task], {
         cwd: __dirname, shell: true, timeout: 180000
     });
 
@@ -500,18 +494,20 @@ bot.onText(/\/task\s*(.*)/, async (msg, match) => {
     taskProc.stdout?.on('data', d => { output += d.toString(); });
     taskProc.stderr?.on('data', d => { output += d.toString(); });
 
+    taskProc.on('error', (err) => {
+        console.log('[Task] spawn 错误:', err.message);
+        taskProc = null;
+        bot.sendMessage(chatId, `❌ Task 执行失败: ${err.message}`);
+    });
+
     taskProc.on('close', (code) => {
         taskProc = null;
-        try { fs.default.unlinkSync(promptPath); } catch {}
+        console.log(`[Task] 完成 (code=${code}, output=${output.length} chars)`);
 
         const status = code === 0 ? '✅' : '⚠️';
-        const summary = output.length > 300 ? output.substring(output.length - 300) : output;
-        bot.sendMessage(chatId,
-            `${status} *Task 完成*\n📋 ${task}\n\n\`\`\`\n${summary.substring(0, 500)}\n\`\`\``,
-            { parse_mode: 'Markdown' })
-            .catch(() => bot.sendMessage(chatId, `${status} Task 完成: ${task}`));
-
-        console.log(`[Task] 完成 (code=${code})`);
+        const summary = output.length > 400 ? '...' + output.substring(output.length - 400) : output;
+        bot.sendMessage(chatId, `${status} Task 完成\n📋 ${task}\n\n${summary.substring(0, 600)}`)
+            .catch(e => console.log('[Task] 发送失败:', e.message));
     });
 });
 
