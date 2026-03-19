@@ -1,6 +1,8 @@
 // Codex Phone - 手机控制 Codex 的 Web 服务
 // 功能：静态文件服务 + WebSocket 代理到 Codex app-server
 
+import 'dotenv/config';
+
 import express from 'express';
 import { createServer } from 'http';
 import { WebSocket, WebSocketServer } from 'ws';
@@ -329,7 +331,8 @@ setTimeout(() => {
 // ================================================================
 import TelegramBot from 'node-telegram-bot-api';
 
-const TG_TOKEN = '8783767689:AAFXHLR_GxnC_RecnWOPGtiizuXr1NGmoOA';
+const TG_TOKEN = process.env.TG_TOKEN;
+if (!TG_TOKEN) { console.warn('[TG] ⚠️ TG_TOKEN 未配置，Telegram Bot 已禁用'); }
 let tgModel = 'gpt-5.4-mini'; // Codex 默认模型
 const tgThreads = new Map();  // userId -> threadId
 const tgEngine = new Map();   // userId -> 'codex' | 'gemini'

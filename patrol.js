@@ -10,6 +10,7 @@ import { execSync } from 'child_process';
 import fs from 'fs';
 import { dirname, join, basename } from 'path';
 import { fileURLToPath } from 'url';
+import 'dotenv/config';
 import TelegramBot from 'node-telegram-bot-api';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -17,8 +18,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // ===== 配置 =====
 const TARGET_DIR = __dirname;
 const PATROL_DIR = join(TARGET_DIR, '.patrol');
-const TG_TOKEN = '8783767689:AAFXHLR_GxnC_RecnWOPGtiizuXr1NGmoOA';
-const TG_CHAT_ID = '7350861140';
+const TG_TOKEN = process.env.TG_TOKEN;
+const TG_CHAT_ID = process.env.TG_CHAT_ID;
 const PLAN_FILE = join(PATROL_DIR, 'plan.json');
 const LOG_FILE = join(PATROL_DIR, 'log.txt');
 const PROMPT_FILE = join(PATROL_DIR, 'prompt.md');
