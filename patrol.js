@@ -16,10 +16,12 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // ===== 配置 =====
 const TARGET_DIR = __dirname;
+const PATROL_DIR = join(TARGET_DIR, '.patrol');
 const TG_TOKEN = '8783767689:AAFXHLR_GxnC_RecnWOPGtiizuXr1NGmoOA';
 const TG_CHAT_ID = '7350861140';
-const PLAN_FILE = join(TARGET_DIR, '.patrol-plan.json');
-const LOG_FILE = join(TARGET_DIR, '.patrol-log.txt');
+const PLAN_FILE = join(PATROL_DIR, 'plan.json');
+const LOG_FILE = join(PATROL_DIR, 'log.txt');
+const PROMPT_FILE = join(PATROL_DIR, 'prompt.md');
 
 const DEFAULT_TASK = '完善 README.md：加上中文项目简介、功能列表、快速开始、使用说明和项目结构';
 const TASK = process.argv[2] || DEFAULT_TASK;
@@ -32,7 +34,10 @@ async function tg(msg) {
 }
 
 // ===== 日志 =====
-function initLog() { fs.writeFileSync(LOG_FILE, `# Patrol v3 — ${new Date().toLocaleString()}\n`, 'utf-8'); }
+function initLog() {
+    fs.mkdirSync(PATROL_DIR, { recursive: true });
+    fs.writeFileSync(LOG_FILE, `# Patrol v3 — ${new Date().toLocaleString()}\n`, 'utf-8');
+}
 function writeLog(s) { fs.appendFileSync(LOG_FILE, `[${new Date().toLocaleTimeString()}] ${s}\n`, 'utf-8'); }
 function log(emoji, msg) { console.log(`${emoji}  ${msg}`); writeLog(msg); }
 
@@ -40,11 +45,10 @@ function log(emoji, msg) { console.log(`${emoji}  ${msg}`); writeLog(msg); }
 function askCodex(prompt) {
     console.log(`[${new Date().toLocaleTimeString()}] 🤖 Codex 工作中...`);
     writeLog(`PROMPT: ${prompt.substring(0, 150)}...`);
-    const pf = join(TARGET_DIR, '.patrol-prompt.md');
-    fs.writeFileSync(pf, prompt, 'utf-8');
+    fs.writeFileSync(PROMPT_FILE, prompt, 'utf-8');
     try {
         const r = execSync(
-            `codex exec -m gpt-5.4-mini "阅读 .patrol-prompt.md 并按要求执行"`,
+            `codex exec -m gpt-5.4-mini "阅读 .patrol/prompt.md 并按要求执行"`,
             { cwd: TARGET_DIR, encoding: 'utf-8', timeout: 180000, maxBuffer: 10*1024*1024 }
         ).trim();
         writeLog(`DONE (${r.length} chars)`);
@@ -53,7 +57,7 @@ function askCodex(prompt) {
         const o = (e.stdout?.toString() || e.message).trim();
         writeLog(`ERR: ${o.substring(0, 200)}`);
         return o;
-    } finally { try { fs.unlinkSync(pf); } catch {} }
+    } finally { try { fs.unlinkSync(PROMPT_FILE); } catch {} }
 }
 
 // ===== 主流程 =====
@@ -71,7 +75,7 @@ async function main() {
     askCodex(`你收到一个任务：
 "${TASK}"
 
-请先评估这个任务的复杂度，然后写入 .patrol-plan.json：
+请先评估这个任务的复杂度，然后写入 .patrol/plan.json：
 
 如果任务简单（可以一次完成），写：
 {"mode":"direct","summary":"任务简单，直接执行"}

@@ -475,12 +475,13 @@ bot.onText(/\/patrol\s*(.*)/, async (msg, match) => {
     bot.sendMessage(chatId, `🚀 *Patrol 启动*\n📋 ${task}\n\n_后台执行中，你可以继续聊天..._`, { parse_mode: 'Markdown' });
 
     // 把任务写入指令文件
-    const promptPath = join(__dirname, '.patrol-prompt.md');
+    const promptPath = join(__dirname, '.patrol', 'prompt.md');
     const fs = await import('fs');
+    fs.default.mkdirSync(join(__dirname, '.patrol'), { recursive: true });
     fs.default.writeFileSync(promptPath, task, 'utf-8');
 
     // 异步执行 codex exec
-    patrolProc = spawn('codex', ['exec', '-m', 'gpt-5.4-mini', '阅读 .patrol-prompt.md 并按要求执行'], {
+    patrolProc = spawn('codex', ['exec', '-m', 'gpt-5.4-mini', '阅读 .patrol/prompt.md 并按要求执行'], {
         cwd: __dirname, shell: true, timeout: 180000
     });
 
