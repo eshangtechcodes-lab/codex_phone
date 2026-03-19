@@ -1,3 +1,4 @@
 node_modules/
 .env
 .patrol-report.md
+.patrol-plan.json
