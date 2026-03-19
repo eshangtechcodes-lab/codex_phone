@@ -398,9 +398,10 @@ bot.onText(/\/model\s*(.*)/, (msg, match) => {
     }
 });
 
-// /quota 查看额度
+// /quota 查看额度（含账户信息）
 bot.onText(/\/quota/, async (msg) => {
     try {
+        // 获取额度
         const result = await quickRpc('account/rateLimits/read', {});
         const limits = result.rateLimits || {};
         const p = limits.primary || {};
@@ -408,11 +409,27 @@ bot.onText(/\/quota/, async (msg) => {
         const resetMin = Math.max(0, Math.round((p.resetsAt * 1000 - Date.now()) / 60000));
         const resetH = Math.floor(resetMin / 60);
         const resetM = resetMin % 60;
+
+        // 读取账户信息
+        let email = 'unknown';
+        let lastRefresh = '';
+        try {
+            const authFile = join(process.env.USERPROFILE || process.env.HOME, '.codex', 'auth.json');
+            const { default: fs } = await import('fs');
+            const auth = JSON.parse(fs.readFileSync(authFile, 'utf-8'));
+            lastRefresh = auth.last_refresh ? new Date(auth.last_refresh).toLocaleString('zh-CN') : '';
+            // 从 id_token 的 payload 解码邮箱
+            const payload = JSON.parse(Buffer.from(auth.tokens?.id_token?.split('.')[1] || '', 'base64').toString());
+            email = payload.email || 'unknown';
+        } catch {}
+
         bot.sendMessage(msg.chat.id,
             `📊 *额度信息*\n\n` +
-            `⏱ 5h: 剩余 *${100 - (p.usedPercent || 0)}%* ↻${resetH}h${resetM}m\n` +
-            `📅 Week: 剩余 *${100 - (s.usedPercent || 0)}%*\n` +
-            `📋 Plan: *${limits.planType || 'unknown'}*`,
+            `👤 账户: \`${email}\`\n` +
+            `📋 Plan: *${limits.planType || 'unknown'}*\n\n` +
+            `⏱ 5h: 已用 *${p.usedPercent || 0}%* ↻${resetH}h${resetM}m\n` +
+            `📅 Week: 已用 *${s.usedPercent || 0}%*\n` +
+            (lastRefresh ? `\n🔄 上次刷新: ${lastRefresh}` : ''),
             { parse_mode: 'Markdown' }
         );
     } catch (e) {
