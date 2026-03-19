@@ -341,8 +341,7 @@ const tgEngine = new Map();   // userId -> 'codex' | 'gemini'
 // 代理配置（国内服务器需要代理访问 Telegram API）
 const botOptions = { polling: true };
 if (process.env.TG_PROXY) {
-    const agent = new SocksProxyAgent(process.env.TG_PROXY);
-    botOptions.request = { agent };
+    botOptions.request = { proxy: process.env.TG_PROXY };
     console.log(`[TG] 使用代理: ${process.env.TG_PROXY}`);
 }
 
