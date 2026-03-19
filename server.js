@@ -338,21 +338,32 @@ const bot = new TelegramBot(TG_TOKEN, { polling: true });
 
 bot.on('polling_error', (err) => console.log('[TG] Polling error:', err.message));
 
-// /start 命令
+// /start 和 /help 命令
+const helpText = (engine) =>
+    '🤖 *AI Bot* 已上线！\n\n' +
+    `当前引擎: *${engine.toUpperCase()}*\n\n` +
+    '💬 *聊天*\n' +
+    '/codex — 切到 Codex（能执行代码）\n' +
+    '/gemini — 切到 Gemini（多模态）\n' +
+    '/new — 新建会话\n' +
+    '/model — 切换 Codex 模型\n' +
+    '/quota — 查看额度\n\n' +
+    '🔧 *任务*\n' +
+    '`/task 任务描述` — 后台执行任务\n' +
+    '`/task status` — 查看任务状态\n' +
+    '`/task stop` — 停止任务\n\n' +
+    '/help — 显示本帮助';
+
 bot.onText(/\/start/, (msg) => {
     const engine = tgEngine.get(msg.from.id) || 'codex';
-    bot.sendMessage(msg.chat.id,
-        '🤖 *AI Bot* 已上线！\n\n' +
-        `当前引擎: *${engine.toUpperCase()}*\n\n` +
-        '命令：\n' +
-        '/codex — 切到 Codex（能执行代码）\n' +
-        '/gemini — 切到 Gemini（多模态、免费）\n' +
-        '/new — 新建会话\n' +
-        '/model — 切换 Codex 模型\n' +
-        '/quota — 查看额度',
-        { parse_mode: 'Markdown' }
-    );
+    bot.sendMessage(msg.chat.id, helpText(engine), { parse_mode: 'Markdown' });
 });
+
+bot.onText(/\/help/, (msg) => {
+    const engine = tgEngine.get(msg.from.id) || 'codex';
+    bot.sendMessage(msg.chat.id, helpText(engine), { parse_mode: 'Markdown' });
+});
+
 
 // /codex 切换引擎
 bot.onText(/\/codex/, (msg) => {
