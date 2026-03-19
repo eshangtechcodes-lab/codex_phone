@@ -437,6 +437,73 @@ function geminiChat(message) {
 }
 
 // 图片/语音/文件提示
+// /patrol — 后台执行任务（不阻塞聊天）
+let patrolProc = null;
+bot.onText(/\/patrol\s*(.*)/, async (msg, match) => {
+    const task = match[1]?.trim();
+    const chatId = msg.chat.id;
+
+    if (!task || task === 'help') {
+        bot.sendMessage(chatId,
+            '🤖 *Patrol — 后台任务执行*\n\n' +
+            '用法:\n' +
+            '`/patrol 完善README`\n' +
+            '`/patrol 给项目加.env.example`\n' +
+            '`/patrol stop` — 停止当前任务\n' +
+            '`/patrol status` — 查看状态',
+            { parse_mode: 'Markdown' });
+        return;
+    }
+
+    if (task === 'stop') {
+        if (patrolProc) { patrolProc.kill(); patrolProc = null; bot.sendMessage(chatId, '🛑 已停止'); }
+        else bot.sendMessage(chatId, 'ℹ️ 没有正在执行的任务');
+        return;
+    }
+
+    if (task === 'status') {
+        bot.sendMessage(chatId, patrolProc ? '⏳ 正在执行任务...' : '✅ 空闲');
+        return;
+    }
+
+    if (patrolProc) {
+        bot.sendMessage(chatId, '⚠️ 有任务正在执行中，先 `/patrol stop` 再下新任务', { parse_mode: 'Markdown' });
+        return;
+    }
+
+    console.log(`[Patrol] 新任务: "${task}"`);
+    bot.sendMessage(chatId, `🚀 *Patrol 启动*\n📋 ${task}\n\n_后台执行中，你可以继续聊天..._`, { parse_mode: 'Markdown' });
+
+    // 把任务写入指令文件
+    const promptPath = join(__dirname, '.patrol-prompt.md');
+    const fs = await import('fs');
+    fs.default.writeFileSync(promptPath, task, 'utf-8');
+
+    // 异步执行 codex exec
+    patrolProc = spawn('codex', ['exec', '-m', 'gpt-5.4-mini', '阅读 .patrol-prompt.md 并按要求执行'], {
+        cwd: __dirname, shell: true, timeout: 180000
+    });
+
+    let output = '';
+    patrolProc.stdout?.on('data', d => { output += d.toString(); });
+    patrolProc.stderr?.on('data', d => { output += d.toString(); });
+
+    patrolProc.on('close', (code) => {
+        patrolProc = null;
+        try { fs.default.unlinkSync(promptPath); } catch {}
+
+        const status = code === 0 ? '✅' : '⚠️';
+        const summary = output.length > 300 ? output.substring(output.length - 300) : output;
+        bot.sendMessage(chatId,
+            `${status} *Patrol 完成*\n📋 ${task}\n\n\`\`\`\n${summary.substring(0, 500)}\n\`\`\``,
+            { parse_mode: 'Markdown' })
+            .catch(() => bot.sendMessage(chatId, `${status} Patrol 完成: ${task}`));
+
+        console.log(`[Patrol] 完成 (code=${code})`);
+    });
+});
+
+// 不支持的消息类型
 bot.on('photo', (msg) => {
     bot.sendMessage(msg.chat.id, '📷 暂不支持图片识别（Gemini CLI 不支持传图）。\n请用文字描述图片内容，我来帮你分析！');
 });
