@@ -657,3 +657,114 @@ function initVoiceInput() {
 // --- Init ---
 initVoiceInput();
 connect();
+
+// ================================================================
+// PWA 支持：Service Worker 注册、网络状态、安装提示
+// ================================================================
+
+// --- Service Worker 注册 ---
+if ('serviceWorker' in navigator) {
+    let refreshing = false;
+
+    navigator.serviceWorker.register('/sw.js').then(reg => {
+        console.log('[SW] Registered, scope:', reg.scope);
+
+        // 检测新版本
+        reg.addEventListener('updatefound', () => {
+            const newWorker = reg.installing;
+            if (!newWorker) return;
+
+            newWorker.addEventListener('statechange', () => {
+                // 新 SW 已安装完毕，等待激活 → 提示用户刷新
+                if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                    console.log('[SW] New version available');
+                    showUpdateBar(newWorker);
+                }
+            });
+        });
+    }).catch(err => {
+        console.warn('[SW] Registration failed:', err);
+    });
+
+    // 监听 controllerchange → 自动刷新页面（防止重复刷新）
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (!refreshing) {
+            refreshing = true;
+            location.reload();
+        }
+    });
+}
+
+// --- 更新提示条 ---
+function showUpdateBar(worker) {
+    const bar = document.getElementById('updateBar');
+    const btn = document.getElementById('updateBtn');
+    bar.classList.add('show');
+
+    btn.addEventListener('click', () => {
+        // 通知新 SW 立即激活
+        worker.postMessage('skipWaiting');
+        bar.classList.remove('show');
+    });
+}
+
+// --- 网络状态监听 ---
+const offlineBar = document.getElementById('offlineBar');
+
+function updateOnlineStatus() {
+    if (navigator.onLine) {
+        offlineBar.classList.remove('show');
+    } else {
+        offlineBar.classList.add('show');
+    }
+}
+
+window.addEventListener('online', updateOnlineStatus);
+window.addEventListener('offline', updateOnlineStatus);
+// 初始检查
+updateOnlineStatus();
+
+// --- 安装提示（beforeinstallprompt） ---
+let deferredPrompt = null;
+const installPrompt = document.getElementById('installPrompt');
+const installBtn = document.getElementById('installBtn');
+const installDismiss = document.getElementById('installDismiss');
+
+window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredPrompt = e;
+
+    // 如果用户之前没有关闭过，延迟 3 秒展示
+    const dismissed = localStorage.getItem('codex_install_dismissed');
+    if (!dismissed) {
+        setTimeout(() => {
+            installPrompt.classList.add('show');
+        }, 3000);
+    }
+});
+
+if (installBtn) {
+    installBtn.addEventListener('click', async () => {
+        if (!deferredPrompt) return;
+        installPrompt.classList.remove('show');
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        console.log('[PWA] Install outcome:', outcome);
+        deferredPrompt = null;
+    });
+}
+
+if (installDismiss) {
+    installDismiss.addEventListener('click', () => {
+        installPrompt.classList.remove('show');
+        localStorage.setItem('codex_install_dismissed', '1');
+    });
+}
+
+// 已安装后隐藏提示
+window.addEventListener('appinstalled', () => {
+    console.log('[PWA] App installed');
+    installPrompt.classList.remove('show');
+    deferredPrompt = null;
+});
+

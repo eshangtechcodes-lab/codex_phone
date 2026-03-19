@@ -4,18 +4,32 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Codex Phone</title>
+    <meta name="description" content="Mobile control panel for Codex CLI — AI coding assistant">
     <!-- PWA -->
     <link rel="manifest" href="/manifest.json">
     <meta name="theme-color" content="#0d1117">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Codex">
+    <link rel="apple-touch-icon" href="/icons/icon-192.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
+    <!-- 离线状态条 -->
+    <div class="offline-bar" id="offlineBar">
+        <span>⚡ 网络已断开 — 仅可查看缓存内容</span>
+    </div>
+
+    <!-- 更新提示条 -->
+    <div class="update-bar" id="updateBar">
+        <span>🔄 新版本可用</span>
+        <button id="updateBtn">立即刷新</button>
+    </div>
+
     <!-- 顶部状态栏 -->
     <header class="header">
         <div class="header-left">
@@ -69,6 +83,19 @@
                         style="fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;" />
                 </svg>
             </button>
+        </div>
+    </div>
+
+    <!-- 安装提示 -->
+    <div class="install-prompt" id="installPrompt">
+        <div class="install-prompt-content">
+            <img src="/icons/icon-192.png" alt="Codex" class="install-icon">
+            <div class="install-text">
+                <strong>安装 Codex Phone</strong>
+                <span>添加到主屏幕，获得原生体验</span>
+            </div>
+            <button class="install-btn" id="installBtn">安装</button>
+            <button class="install-dismiss" id="installDismiss">✕</button>
         </div>
     </div>
 
