@@ -330,6 +330,7 @@ setTimeout(() => {
 // Telegram Bot - 通过 Telegram 聊天使用 Codex
 // ================================================================
 import TelegramBot from 'node-telegram-bot-api';
+import { SocksProxyAgent } from 'socks-proxy-agent';
 
 const TG_TOKEN = process.env.TG_TOKEN;
 if (!TG_TOKEN) { console.warn('[TG] ⚠️ TG_TOKEN 未配置，Telegram Bot 已禁用'); }
@@ -337,7 +338,15 @@ let tgModel = 'gpt-5.4-mini'; // Codex 默认模型
 const tgThreads = new Map();  // userId -> threadId
 const tgEngine = new Map();   // userId -> 'codex' | 'gemini'
 
-const bot = new TelegramBot(TG_TOKEN, { polling: true });
+// 代理配置（国内服务器需要代理访问 Telegram API）
+const botOptions = { polling: true };
+if (process.env.TG_PROXY) {
+    const agent = new SocksProxyAgent(process.env.TG_PROXY);
+    botOptions.request = { agent };
+    console.log(`[TG] 使用代理: ${process.env.TG_PROXY}`);
+}
+
+const bot = new TelegramBot(TG_TOKEN, botOptions);
 
 bot.on('polling_error', (err) => console.log('[TG] Polling error:', err.message));
 
