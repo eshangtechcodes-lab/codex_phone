@@ -330,9 +330,10 @@ setTimeout(() => {
 // Telegram Bot - 通过 Telegram 聊天使用 Codex
 // ================================================================
 import TelegramBot from 'node-telegram-bot-api';
-import { SocksProxyAgent } from 'socks-proxy-agent';
 
 const TG_TOKEN = process.env.TG_TOKEN;
+console.log(`[TG] TOKEN: ${TG_TOKEN ? TG_TOKEN.substring(0, 10) + '...' : 'NOT SET'}`);
+console.log(`[TG] PROXY: ${process.env.TG_PROXY || 'NONE'}`);
 if (!TG_TOKEN) { console.warn('[TG] ⚠️ TG_TOKEN 未配置，Telegram Bot 已禁用'); }
 let tgModel = 'gpt-5.4-mini'; // Codex 默认模型
 const tgThreads = new Map();  // userId -> threadId
