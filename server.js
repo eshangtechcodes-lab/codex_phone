@@ -334,6 +334,7 @@ import TelegramBot from 'node-telegram-bot-api';
 const TG_TOKEN = process.env.TG_TOKEN;
 if (!TG_TOKEN) { console.warn('[TG] ⚠️ TG_TOKEN 未配置，Telegram Bot 已禁用'); }
 let tgModel = 'gpt-5.4-mini'; // Codex 默认模型
+let tgGeminiModel = 'gemini-2.5-pro'; // Gemini 默认模型
 const tgThreads = new Map();  // userId -> threadId
 const tgEngine = new Map();   // userId -> 'codex' | 'gemini'
 
@@ -393,18 +394,33 @@ bot.onText(/\/new/, (msg) => {
     bot.sendMessage(msg.chat.id, '✅ 已开始新会话');
 });
 
-// /model 切换 Codex 模型
+// /model 切换模型（自动识别当前引擎）
 bot.onText(/\/model\s*(.*)/, (msg, match) => {
-    const models = ['gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex', 'gpt-5.2-codex', 'gpt-5.2', 'gpt-5.1-codex-max', 'gpt-5.1-codex-mini'];
+    const engine = tgEngine.get(msg.from.id) || 'codex';
     const input = (match[1] || '').trim();
-    if (input && models.includes(input)) {
-        tgModel = input;
-        bot.sendMessage(msg.chat.id, `✅ Codex 模型切换为: *${tgModel}*`, { parse_mode: 'Markdown' });
+
+    if (engine === 'gemini') {
+        const geminiModels = ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-3.1-pro-preview'];
+        if (input && geminiModels.includes(input)) {
+            tgGeminiModel = input;
+            bot.sendMessage(msg.chat.id, `✅ Gemini 模型切换为: *${tgGeminiModel}*`, { parse_mode: 'Markdown' });
+        } else {
+            bot.sendMessage(msg.chat.id,
+                `🔮 当前 Gemini 模型: *${tgGeminiModel}*\n\n可选：\n${geminiModels.map(m => `\`/model ${m}\``).join('\n')}`,
+                { parse_mode: 'Markdown' }
+            );
+        }
     } else {
-        bot.sendMessage(msg.chat.id,
-            `当前 Codex 模型: *${tgModel}*\n\n可选：\n${models.map(m => `\`/model ${m}\``).join('\n')}`,
-            { parse_mode: 'Markdown' }
-        );
+        const codexModels = ['gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex', 'gpt-5.2-codex', 'gpt-5.2', 'gpt-5.1-codex-max', 'gpt-5.1-codex-mini'];
+        if (input && codexModels.includes(input)) {
+            tgModel = input;
+            bot.sendMessage(msg.chat.id, `✅ Codex 模型切换为: *${tgModel}*`, { parse_mode: 'Markdown' });
+        } else {
+            bot.sendMessage(msg.chat.id,
+                `🤖 当前 Codex 模型: *${tgModel}*\n\n可选：\n${codexModels.map(m => `\`/model ${m}\``).join('\n')}`,
+                { parse_mode: 'Markdown' }
+            );
+        }
     }
 });
 
@@ -450,7 +466,7 @@ bot.onText(/\/quota/, async (msg) => {
 // --- Gemini 调用（通过 CLI） ---
 function geminiChat(message) {
     return new Promise((resolve, reject) => {
-        const proc = spawn('gemini', ['-p', message, '--output-format', 'json'], {
+        const proc = spawn('gemini', ['-p', message, '--model', tgGeminiModel, '--output-format', 'json'], {
             shell: true,
             timeout: 120000
         });
