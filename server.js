@@ -9,9 +9,71 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+// ================================================================
+// Memory System
+// ================================================================
+const MEMORY_DIR = join(process.env.USERPROFILE || process.env.HOME, '.codex_phone', 'memory');
+const MEMORY_CATEGORIES = ['profile', 'projects', 'servers', 'skills', 'notes'];
+if (!existsSync(MEMORY_DIR)) { mkdirSync(MEMORY_DIR, { recursive: true }); }
+
+const chatHistory = new Map();
+const MAX_HISTORY = 20;
+
+function addHistory(userId, role, content) {
+    if (!chatHistory.has(userId)) chatHistory.set(userId, []);
+    const h = chatHistory.get(userId);
+    h.push({ role, content: content.substring(0, 500) });
+    if (h.length > MAX_HISTORY) h.shift();
+}
+
+function loadMemory() {
+    let memory = '';
+    for (const cat of MEMORY_CATEGORIES) {
+        const f = join(MEMORY_DIR, `${cat}.md`);
+        if (existsSync(f)) {
+            const content = readFileSync(f, 'utf-8').trim();
+            if (content) memory += `\n### ${cat}\n${content}\n`;
+        }
+    }
+    return memory;
+}
+
+const MEMORY_TRIGGERS = ['\u603b\u7ed3\u4e00\u4e0b', '\u8bb0\u4e0b\u6765', '\u8bb0\u4f4f\u8fd9\u4e9b', '\u4fdd\u5b58\u4e00\u4e0b', '\u8bb0\u5f55\u4e00\u4e0b', '\u603b\u7ed3\u5bf9\u8bdd', '\u5e2e\u6211\u8bb0\u4f4f', 'save this', 'remember this'];
+function isMemoryTrigger(text) {
+    return MEMORY_TRIGGERS.some(t => text.includes(t));
+}
+
+async function extractAndSave(userId) {
+    const history = chatHistory.get(userId);
+    if (!history || history.length < 2) return '\u6ca1\u6709\u8db3\u591f\u7684\u5bf9\u8bdd\u53ef\u4ee5\u603b\u7ed3\u3002';
+    const conversation = history.map(h => `${h.role}: ${h.content}`).join('\n');
+    const prompt = `\u4f60\u662f\u4fe1\u606f\u63d0\u53d6\u52a9\u624b\u3002\u4ece\u4ee5\u4e0b\u5bf9\u8bdd\u4e2d\u63d0\u53d6\u6709\u4ef7\u503c\u7684\u4fe1\u606f\uff0c\u6309JSON\u683c\u5f0f\u8f93\u51fa\u3002\n\u7c7b\u522b: profile(\u4e2a\u4eba\u4fe1\u606f), projects(\u9879\u76ee), servers(\u670d\u52a1\u5668), skills(\u6280\u80fd\u6d41\u7a0b), notes(\u5176\u4ed6)\n\u53ea\u8f93\u51fa\u6709\u65b0\u4fe1\u606f\u7684\u7c7b\u522b\u3002\u4e25\u683c\u8f93\u51faJSON\uff0c\u65e0\u5176\u4ed6\u6587\u5b57:\n{"profile": "...", "servers": "..."}\n\n\u5bf9\u8bdd:\n${conversation}`;
+    try {
+        const result = await geminiChat(prompt);
+        const jsonMatch = result.match(/\{[\s\S]*\}/);
+        if (!jsonMatch) return '\u672a\u63d0\u53d6\u5230\u6709\u4ef7\u503c\u7684\u4fe1\u606f\u3002';
+        const extracted = JSON.parse(jsonMatch[0]);
+        let saved = [];
+        for (const [cat, content] of Object.entries(extracted)) {
+            if (!MEMORY_CATEGORIES.includes(cat) || !content || content === '\u65e0') continue;
+            const f = join(MEMORY_DIR, `${cat}.md`);
+            const existing = existsSync(f) ? readFileSync(f, 'utf-8') : '';
+            const ts = new Date().toLocaleString('zh-CN');
+            writeFileSync(f, existing + `\n- [${ts}] ${content}`, 'utf-8');
+            saved.push(cat);
+        }
+        if (saved.length === 0) return '\u8fd9\u6bb5\u5bf9\u8bdd\u6ca1\u6709\u9700\u8981\u8bb0\u5fc6\u7684\u65b0\u4fe1\u606f\u3002';
+        return `\u2705 \u5df2\u8bb0\u5fc6\uff01\u4fdd\u5b58\u5230: ${saved.map(s => `*${s}*`).join(', ')}`;
+    } catch (e) {
+        console.log('[Memory] \u63d0\u53d6\u5931\u8d25:', e.message);
+        return '\u274c \u8bb0\u5fc6\u63d0\u53d6\u5931\u8d25: ' + e.message;
+    }
+}
 
 // 配置
 const WEB_PORT = 3002;          // Web 服务端口
@@ -357,6 +419,7 @@ bot.setMyCommands([
     { command: 'model', description: '🔄 切换模型' },
     { command: 'new', description: '✨ 新建会话' },
     { command: 'quota', description: '📊 查看额度' },
+    { command: 'memory', description: '🧠 查看记忆' },
     { command: 'task', description: '🔧 后台执行任务' },
 ]).then(() => console.log('[TG] 命令菜单已注册')).catch(() => {});
 
@@ -504,6 +567,26 @@ function geminiChat(message) {
     });
 }
 
+// /memory 查看和管理记忆
+bot.onText(/\/memory\s*(.*)/, async (msg, match) => {
+    const arg = (match[1] || '').trim();
+    if (arg === 'clear') {
+        for (const cat of MEMORY_CATEGORIES) {
+            const f = join(MEMORY_DIR, `${cat}.md`);
+            if (existsSync(f)) writeFileSync(f, '', 'utf-8');
+        }
+        bot.sendMessage(msg.chat.id, '🗑️ 所有记忆已清空');
+        return;
+    }
+    const memory = loadMemory();
+    if (!memory.trim()) {
+        bot.sendMessage(msg.chat.id, '🧠 记忆为空\n\n聊天后说“总结一下”或“记下来”即可保存记忆。');
+    } else {
+        bot.sendMessage(msg.chat.id, `🧠 *当前记忆*\n${memory}\n\n_发 /memory clear 清空_`, { parse_mode: 'Markdown' })
+            .catch(() => bot.sendMessage(msg.chat.id, `🧠 当前记忆\n${memory}\n\n发 /memory clear 清空`));
+    }
+});
+
 // 图片/语音/文件提示
 // /task — 后台执行任务（不阻塞聊天）
 let taskProc = null;
@@ -584,23 +667,40 @@ bot.on('message', async (msg) => {
     const userId = msg.from.id;
     const engine = tgEngine.get(userId) || 'codex';
 
+    // 记忆触发检测
+    if (isMemoryTrigger(msg.text)) {
+        bot.sendChatAction(msg.chat.id, 'typing');
+        console.log(`[Memory] 用户触发记忆提取`);
+        const result = await extractAndSave(userId);
+        bot.sendMessage(msg.chat.id, result, { parse_mode: 'Markdown' })
+            .catch(() => bot.sendMessage(msg.chat.id, result));
+        return;
+    }
+
+    // 记录对话历史
+    addHistory(userId, '用户', msg.text);
     bot.sendChatAction(msg.chat.id, 'typing');
+
+    // 加载记忆作为上下文
+    const memory = loadMemory();
+    const memCtx = memory.trim() ? `[以下是你记住的关于用户的信息，请参考但不要主动提起]\n${memory}\n\n` : '';
 
     try {
         let reply;
         if (engine === 'gemini') {
-            // Gemini 引擎
             console.log(`[TG/Gemini] "${msg.text.substring(0, 50)}"`);
-            reply = await geminiChat(msg.text);
+            reply = await geminiChat(memCtx + msg.text);
         } else {
-            // Codex 引擎
             const threadId = tgThreads.get(userId) || null;
             console.log(`[TG/Codex] "${msg.text.substring(0, 50)}" model=${tgModel}`);
-            const result = await codexChat(msg.text, tgModel, threadId);
+            // 新会话才注入记忆，已有会话不重复注入
+            const text = threadId ? msg.text : memCtx + msg.text;
+            const result = await codexChat(text, tgModel, threadId);
             if (result.threadId) tgThreads.set(userId, result.threadId);
             reply = result.reply;
         }
-        // 发送回复
+        // 记录 AI 回复
+        addHistory(userId, 'AI', reply?.substring(0, 500) || '');
         bot.sendMessage(msg.chat.id, reply || '(empty reply)', { parse_mode: 'Markdown' })
             .catch(() => bot.sendMessage(msg.chat.id, reply || '(empty reply)'));
     } catch (e) {
