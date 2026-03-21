@@ -52,7 +52,29 @@ async function extractAndSave(userId) {
     const history = chatHistory.get(userId);
     if (!history || history.length < 2) return '\u6ca1\u6709\u8db3\u591f\u7684\u5bf9\u8bdd\u53ef\u4ee5\u603b\u7ed3\u3002';
     const conversation = history.map(h => `${h.role}: ${h.content}`).join('\n');
-    const prompt = `\u4f60\u662f\u4fe1\u606f\u63d0\u53d6\u52a9\u624b\u3002\u4ece\u4ee5\u4e0b\u5bf9\u8bdd\u4e2d\u63d0\u53d6\u6709\u4ef7\u503c\u7684\u4fe1\u606f\uff0c\u6309JSON\u683c\u5f0f\u8f93\u51fa\u3002\n\u7c7b\u522b: profile(\u4e2a\u4eba\u4fe1\u606f), projects(\u9879\u76ee), servers(\u670d\u52a1\u5668), skills(\u6280\u80fd\u6d41\u7a0b), notes(\u5176\u4ed6)\n\u53ea\u8f93\u51fa\u6709\u65b0\u4fe1\u606f\u7684\u7c7b\u522b\u3002\u4e25\u683c\u8f93\u51faJSON\uff0c\u65e0\u5176\u4ed6\u6587\u5b57:\n{"profile": "...", "servers": "..."}\n\n\u5bf9\u8bdd:\n${conversation}`;
+
+    // 读取已有记忆，传给 AI 做去重/更新
+    const existingMemory = loadMemory();
+    const existingSection = existingMemory.trim()
+        ? `\n\u5df2\u6709\u8bb0\u5fc6\uff08\u8bf7\u5728\u6b64\u57fa\u7840\u4e0a\u66f4\u65b0\uff0c\u4e0d\u8981\u91cd\u590d\uff09:\n${existingMemory}\n`
+        : '';
+
+    const prompt = `\u4f60\u662f\u8bb0\u5fc6\u7ba1\u7406\u52a9\u624b\u3002\u4ece\u5bf9\u8bdd\u4e2d\u63d0\u53d6\u6709\u4ef7\u503c\u7684\u4fe1\u606f\uff0c\u5e76\u4e0e\u5df2\u6709\u8bb0\u5fc6\u5408\u5e76\u3002
+
+\u89c4\u5219:
+1. \u65b0\u4fe1\u606f: \u76f4\u63a5\u6dfb\u52a0
+2. \u91cd\u590d\u4fe1\u606f: \u8df3\u8fc7\uff0c\u4e0d\u91cd\u590d\u8bb0\u5f55
+3. \u51b2\u7a81\u4fe1\u606f: \u7528\u65b0\u7684\u8986\u76d6\u65e7\u7684\uff08\u5982\u90ae\u7bb1\u53d8\u4e86\uff09
+4. \u6bcf\u6761\u8bb0\u5fc6\u7528\u4e00\u884c\u201c- \u5185\u5bb9\u201d\u683c\u5f0f
+
+\u7c7b\u522b: profile(\u4e2a\u4eba\u4fe1\u606f), projects(\u9879\u76ee), servers(\u670d\u52a1\u5668), skills(\u6280\u80fd\u6d41\u7a0b), notes(\u5176\u4ed6)
+${existingSection}
+\u5bf9\u8bdd:
+${conversation}
+
+\u8f93\u51faJSON\uff0c\u6bcf\u4e2a\u7c7b\u522b\u7684\u503c\u662f\u5408\u5e76\u540e\u7684\u5b8c\u6574\u5185\u5bb9\uff08\u591a\u6761\u7528\\n\u5206\u9694\uff09\uff0c\u6ca1\u6709\u53d8\u5316\u7684\u7c7b\u522b\u4e0d\u8f93\u51fa:
+{"profile": "- xxx\\n- yyy", "servers": "- zzz"}`;
+
     try {
         const result = await geminiChat(prompt);
         const jsonMatch = result.match(/\{[\s\S]*\}/);
@@ -62,13 +84,12 @@ async function extractAndSave(userId) {
         for (const [cat, content] of Object.entries(extracted)) {
             if (!MEMORY_CATEGORIES.includes(cat) || !content || content === '\u65e0') continue;
             const f = join(MEMORY_DIR, `${cat}.md`);
-            const existing = existsSync(f) ? readFileSync(f, 'utf-8') : '';
-            const ts = new Date().toLocaleString('zh-CN');
-            writeFileSync(f, existing + `\n- [${ts}] ${content}`, 'utf-8');
+            // \u8986\u76d6\u5199\u5165\uff08AI \u5df2\u5408\u5e76\u53bb\u91cd\uff09
+            writeFileSync(f, content.replace(/\\n/g, '\n'), 'utf-8');
             saved.push(cat);
         }
         if (saved.length === 0) return '\u8fd9\u6bb5\u5bf9\u8bdd\u6ca1\u6709\u9700\u8981\u8bb0\u5fc6\u7684\u65b0\u4fe1\u606f\u3002';
-        return `\u2705 \u5df2\u8bb0\u5fc6\uff01\u4fdd\u5b58\u5230: ${saved.map(s => `*${s}*`).join(', ')}`;
+        return `\u2705 \u5df2\u66f4\u65b0\u8bb0\u5fc6\uff01${saved.map(s => `*${s}*`).join(', ')}`;
     } catch (e) {
         console.log('[Memory] \u63d0\u53d6\u5931\u8d25:', e.message);
         return '\u274c \u8bb0\u5fc6\u63d0\u53d6\u5931\u8d25: ' + e.message;
