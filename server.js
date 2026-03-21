@@ -309,10 +309,7 @@ function codexChat(message, model, existingThreadId) {
         let rpcId = 1;
         let threadId = existingThreadId;
         let responseText = '';
-        const timeout = setTimeout(() => {
-            ws.close();
-            reject(new Error('Timeout: Codex did not respond in 120s'));
-        }, 120000);
+        // 不再设超时限制，让 Codex 自由运行
 
         function send(method, params) {
             const id = rpcId++;
@@ -374,7 +371,6 @@ function codexChat(message, model, existingThreadId) {
 
             // 通知：turn 完成
             if (msg.method === 'turn/completed') {
-                clearTimeout(timeout);
                 ws.close();
                 resolve({
                     reply: responseText,
@@ -394,7 +390,6 @@ function codexChat(message, model, existingThreadId) {
         });
 
         ws.on('error', (err) => {
-            clearTimeout(timeout);
             reject(err);
         });
     });
