@@ -29,7 +29,7 @@ const SYSTEM_PROMPT = existsSync(SYSTEM_PROMPT_FILE)
 if (SYSTEM_PROMPT) console.log('[System] 人设已加载');
 
 const chatHistory = new Map();
-const MAX_HISTORY = 20;
+const MAX_HISTORY = 50;
 
 function addHistory(userId, role, content) {
     if (!chatHistory.has(userId)) chatHistory.set(userId, []);
@@ -572,8 +572,7 @@ bot.onText(/\/quota/, async (msg) => {
 function geminiChat(message) {
     return new Promise((resolve, reject) => {
         const proc = spawn('gemini', ['-p', message, '--model', tgGeminiModel, '--output-format', 'json'], {
-            shell: true,
-            timeout: 120000
+            shell: true
         });
         let stdout = '';
         let stderr = '';
@@ -759,7 +758,7 @@ function quickRpc(method, params) {
             }
         });
         ws.on('error', e => { reject(e); });
-        setTimeout(() => { ws.close(); reject(new Error('timeout')); }, 5000);
+        setTimeout(() => { ws.close(); reject(new Error('timeout')); }, 30000);
     });
 }
 
