@@ -349,6 +349,17 @@ const bot = new TelegramBot(TG_TOKEN, botOptions);
 
 bot.on('polling_error', (err) => console.log('[TG] Polling error:', err.message));
 
+// 注册命令菜单（输入 / 时显示快捷命令）
+bot.setMyCommands([
+    { command: 'help', description: '📖 帮助信息' },
+    { command: 'codex', description: '🤖 切换到 Codex 引擎' },
+    { command: 'gemini', description: '🔮 切换到 Gemini 引擎' },
+    { command: 'model', description: '🔄 切换模型' },
+    { command: 'new', description: '✨ 新建会话' },
+    { command: 'quota', description: '📊 查看额度' },
+    { command: 'task', description: '🔧 后台执行任务' },
+]).then(() => console.log('[TG] 命令菜单已注册')).catch(() => {});
+
 // /start 和 /help 命令
 const helpText = (engine) =>
     '🤖 *AI Bot* 已上线！\n\n' +
@@ -357,7 +368,7 @@ const helpText = (engine) =>
     '/codex — 切到 Codex（能执行代码）\n' +
     '/gemini — 切到 Gemini（多模态）\n' +
     '/new — 新建会话\n' +
-    '/model — 切换 Codex 模型\n' +
+    '/model — 切换模型\n' +
     '/quota — 查看额度\n\n' +
     '🔧 *任务*\n' +
     '`/task 任务描述` — 后台执行任务\n' +
