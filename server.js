@@ -21,6 +21,13 @@ const MEMORY_DIR = join(process.env.USERPROFILE || process.env.HOME, '.codex_pho
 const MEMORY_CATEGORIES = ['profile', 'projects', 'servers', 'skills', 'notes'];
 if (!existsSync(MEMORY_DIR)) { mkdirSync(MEMORY_DIR, { recursive: true }); }
 
+// 加载系统提示（人设）
+const SYSTEM_PROMPT_FILE = join(__dirname, 'system_prompt.md');
+const SYSTEM_PROMPT = existsSync(SYSTEM_PROMPT_FILE)
+    ? readFileSync(SYSTEM_PROMPT_FILE, 'utf-8').trim()
+    : '';
+if (SYSTEM_PROMPT) console.log('[System] 人设已加载');
+
 const chatHistory = new Map();
 const MAX_HISTORY = 20;
 
@@ -702,20 +709,22 @@ bot.on('message', async (msg) => {
     addHistory(userId, '用户', msg.text);
     bot.sendChatAction(msg.chat.id, 'typing');
 
-    // 加载记忆作为上下文
+    // 构建上下文（人设 + 记忆）
     const memory = loadMemory();
-    const memCtx = memory.trim() ? `[以下是你记住的关于用户的信息，请参考但不要主动提起]\n${memory}\n\n` : '';
+    let ctx = '';
+    if (SYSTEM_PROMPT) ctx += `[系统指令]\n${SYSTEM_PROMPT}\n\n`;
+    if (memory.trim()) ctx += `[你的记忆]\n${memory}\n\n`;
 
     try {
         let reply;
         if (engine === 'gemini') {
             console.log(`[TG/Gemini] "${msg.text.substring(0, 50)}"`);
-            reply = await geminiChat(memCtx + msg.text);
+            reply = await geminiChat(ctx + msg.text);
         } else {
             const threadId = tgThreads.get(userId) || null;
             console.log(`[TG/Codex] "${msg.text.substring(0, 50)}" model=${tgModel}`);
-            // 新会话才注入记忆，已有会话不重复注入
-            const text = threadId ? msg.text : memCtx + msg.text;
+            // 新会话才注入上下文，已有会话不重复注入
+            const text = threadId ? msg.text : ctx + msg.text;
             const result = await codexChat(text, tgModel, threadId);
             if (result.threadId) tgThreads.set(userId, result.threadId);
             reply = result.reply;
