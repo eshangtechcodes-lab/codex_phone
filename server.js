@@ -449,12 +449,15 @@ bot.onText(/\/quota/, async (msg) => {
             email = payload.email || 'unknown';
         } catch {}
 
+        const pRemain = Math.max(0, 100 - (p.usedPercent || 0));
+        const sRemain = Math.max(0, 100 - (s.usedPercent || 0));
+
         bot.sendMessage(msg.chat.id,
             `📊 *额度信息*\n\n` +
             `👤 账户: \`${email}\`\n` +
             `📋 Plan: *${limits.planType || 'unknown'}*\n\n` +
-            `⏱ 5h: 已用 *${p.usedPercent || 0}%* ↻${resetH}h${resetM}m\n` +
-            `📅 Week: 已用 *${s.usedPercent || 0}%*\n` +
+            `⏱ 5h: 剩余 *${pRemain}%* ↻${resetH}h${resetM}m\n` +
+            `📅 Week: 剩余 *${sRemain}%*\n` +
             (lastRefresh ? `\n🔄 上次刷新: ${lastRefresh}` : ''),
             { parse_mode: 'Markdown' }
         );
