@@ -9,7 +9,7 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -443,6 +443,7 @@ bot.setMyCommands([
     { command: 'new', description: '✨ 新建会话' },
     { command: 'quota', description: '📊 查看额度' },
     { command: 'memory', description: '🧠 查看记忆' },
+    { command: 'account', description: '🔑 切换账户' },
     { command: 'task', description: '🔧 后台执行任务' },
 ]).then(() => console.log('[TG] 命令菜单已注册')).catch(() => {});
 
@@ -489,6 +490,79 @@ bot.onText(/\/gemini/, (msg) => {
 bot.onText(/\/new/, (msg) => {
     tgThreads.delete(msg.from.id);
     bot.sendMessage(msg.chat.id, '✅ 已开始新会话');
+});
+// /account 管理多账户
+bot.onText(/\/account\s*(.*)/, async (msg, match) => {
+    const arg = (match[1] || '').trim();
+    const codexDir = join(process.env.USERPROFILE || process.env.HOME, '.codex');
+    const authFile = join(codexDir, 'auth.json');
+
+    // 读取当前账户邮箱
+    function getEmail(file) {
+        try {
+            const auth = JSON.parse(readFileSync(file, 'utf-8'));
+            const payload = JSON.parse(Buffer.from(auth.tokens?.id_token?.split('.')[1] || '', 'base64').toString());
+            return payload.email || 'unknown';
+        } catch { return 'unknown'; }
+    }
+
+    // 列出所有账户
+    if (!arg || arg === 'list') {
+        const files = readdirSync(codexDir).filter(f => f.match(/^auth_account\d+\.json$/));
+        const currentEmail = getEmail(authFile);
+        let list = `🔑 *当前账户:* \`${currentEmail}\`\n\n`;
+        if (files.length === 0) {
+            list += '暂无备份账户。用 `codex auth` 登录新账户后发 `/account save 2` 保存。';
+        } else {
+            files.sort().forEach(f => {
+                const num = f.match(/\d+/)[0];
+                const email = getEmail(join(codexDir, f));
+                const isCurrent = email === currentEmail ? ' ← 当前' : '';
+                list += `${num}. \`${email}\`${isCurrent}\n`;
+            });
+            list += '\n切换: `/account 1`\n保存当前: `/account save 3`';
+        }
+        bot.sendMessage(msg.chat.id, list, { parse_mode: 'Markdown' })
+            .catch(() => bot.sendMessage(msg.chat.id, list));
+        return;
+    }
+
+    // 保存当前账户为指定编号
+    if (arg.startsWith('save')) {
+        const num = arg.replace('save', '').trim() || '1';
+        const target = join(codexDir, `auth_account${num}.json`);
+        try {
+            const content = readFileSync(authFile, 'utf-8');
+            writeFileSync(target, content, 'utf-8');
+            const email = getEmail(authFile);
+            bot.sendMessage(msg.chat.id, `✅ 已保存当前账户为 *#${num}* (\`${email}\`)`, { parse_mode: 'Markdown' });
+        } catch (e) {
+            bot.sendMessage(msg.chat.id, '❌ 保存失败: ' + e.message);
+        }
+        return;
+    }
+
+    // 切换账户
+    const num = parseInt(arg);
+    if (isNaN(num)) {
+        bot.sendMessage(msg.chat.id, '用法: `/account 1` 切换, `/account save 2` 保存', { parse_mode: 'Markdown' });
+        return;
+    }
+    const source = join(codexDir, `auth_account${num}.json`);
+    if (!existsSync(source)) {
+        bot.sendMessage(msg.chat.id, `❌ 账户 #${num} 不存在`);
+        return;
+    }
+    try {
+        const content = readFileSync(source, 'utf-8');
+        writeFileSync(authFile, content, 'utf-8');
+        const email = getEmail(authFile);
+        // 重启 Codex 进程让新账户生效
+        if (codexProcess) { codexProcess.kill(); }
+        bot.sendMessage(msg.chat.id, `✅ 已切换到账户 *#${num}* (\`${email}\`)\n🔄 Codex 重启中...`, { parse_mode: 'Markdown' });
+    } catch (e) {
+        bot.sendMessage(msg.chat.id, '❌ 切换失败: ' + e.message);
+    }
 });
 
 // /model 切换模型（自动识别当前引擎）
