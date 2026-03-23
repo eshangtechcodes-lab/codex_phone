@@ -31,6 +31,7 @@ API_URL = "https://llm.eshangtech.com/api/agent/"
 DIAGNOSTICS_URL = "https://llm.eshangtech.com/api/admin/diagnostics/"
 USER_ID_PREFIX = "qa_auto"
 TIMEOUT = 300  # 秒（与后端一致）
+LLM_MODE = None  # 请求级 LLM 模式（qwen/codex/hybrid），None 表示用服务器默认
 
 # Golden Set — 基线测试题库（40 题）
 # 设计原则：服务区分散、工具覆盖全、场景多样化
@@ -306,6 +307,9 @@ def send_question(question: str, user_id: str, conversation_id: str = None) -> d
     data = {"message": question, "user_id": user_id}
     if conversation_id:
         data["conversation_id"] = conversation_id
+    # 请求级 LLM 模式（支持 A/B 对比测试）
+    if LLM_MODE:
+        data["llm_mode"] = LLM_MODE
     payload = json.dumps(data, ensure_ascii=False).encode("utf-8")
 
     req = Request(
@@ -793,12 +797,16 @@ def main():
     parser.add_argument("--limit", type=int, help="限制测试题数")
     parser.add_argument("--multi-turn", action="store_true",
                         help="执行多轮语义切换测试（替代单轮 Golden Set）")
+    parser.add_argument("--llm-mode", choices=["qwen", "codex", "hybrid"],
+                        help="请求级 LLM 模式（A/B 对比时使用，不传则用服务器默认）")
     args = parser.parse_args()
 
-    # 覆盖 API URL
+    # 覆盖全局配置
+    global API_URL, LLM_MODE
     if args.api_url != API_URL:
-        import scripts.testing.qa_runner as _self
-        _self.API_URL = args.api_url
+        API_URL = args.api_url
+    if args.llm_mode:
+        LLM_MODE = args.llm_mode
 
     run_id = args.run_id or datetime.now().strftime("qa_%Y%m%d_%H%M")
 

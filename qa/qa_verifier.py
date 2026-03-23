@@ -30,10 +30,15 @@ from typing import Dict, List, Optional, Tuple
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-# 数据库路径
+# 数据库路径：优先相对路径（跨平台），fallback Windows 绝对路径
 _PROJECT_ROOT = Path(__file__).parent.parent.parent
-_MAIN_DB = _PROJECT_ROOT / "data" / "db.sqlite3"
-_MIRROR_DB = _PROJECT_ROOT / "data" / "dameng_mirror.db"
+_DATA_CANDIDATES = [
+    _PROJECT_ROOT / "data",            # ../.. 相对路径（Linux/macOS）
+    Path("d:/AISpace/AI-Python/data"),  # Windows 绝对路径
+]
+_DATA_DIR = next((d for d in _DATA_CANDIDATES if d.exists()), _DATA_CANDIDATES[0])
+_MAIN_DB = _DATA_DIR / "db.sqlite3"
+_MIRROR_DB = _DATA_DIR / "dameng_mirror.db"
 
 
 # ============================================================
@@ -389,25 +394,34 @@ class DeepVerifier:
     def _extract_month_from_question(self, question: str) -> str:
         """从问题中提取月份，返回 YYYYMM 格式"""
         import re as _re
-        # "2月" "2月份" "二月" → 202602
+        from datetime import datetime as _dt
+        current_year = _dt.now().year
+        current_month = _dt.now().month
+        # "2月" "2月份" "二月" → YYYY02
         month_map = {
             "一": "01", "二": "02", "三": "03", "四": "04",
             "五": "05", "六": "06", "七": "07", "八": "08",
             "九": "09", "十": "10", "十一": "11", "十二": "12",
         }
+        # 带年份的月份（"2025年3月"）
+        ym = _re.search(r'(\d{4})\s*年\s*(\d{1,2})\s*月', question)
+        if ym:
+            return f"{ym.group(1)}{int(ym.group(2)):02d}"
         # 数字月份
         m = _re.search(r'(\d{1,2})\s*月', question)
         if m:
             month_num = int(m.group(1))
             if 1 <= month_num <= 12:
-                return f"2026{month_num:02d}"
+                return f"{current_year}{month_num:02d}"
         # 中文月份
         for cn, num in month_map.items():
             if cn + "月" in question:
-                return f"2026{num}"
-        # "上个月" → 前一个月
+                return f"{current_year}{num}"
+        # "上个月" → 动态计算
         if "上个月" in question or "上月" in question:
-            return "202602"  # 当前3月 → 上月2月
+            prev_month = current_month - 1 if current_month > 1 else 12
+            prev_year = current_year if current_month > 1 else current_year - 1
+            return f"{prev_year}{prev_month:02d}"
         return ""
 
     def check_revenue_numbers(
