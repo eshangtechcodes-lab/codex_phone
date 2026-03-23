@@ -1,3 +1,8 @@
 node_modules/
 .env
 .patrol/
+
+qa/*.json
+qa/*.db
+qa/__pycache__/
+qa/qa_patrol_*.md
