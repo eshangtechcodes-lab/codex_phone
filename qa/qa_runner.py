@@ -30,7 +30,7 @@ if sys.platform == "win32":
 API_URL = "https://llm.eshangtech.com/api/agent/"
 DIAGNOSTICS_URL = "https://llm.eshangtech.com/api/admin/diagnostics/"
 USER_ID_PREFIX = "qa_auto"
-TIMEOUT = 60  # 秒
+TIMEOUT = 300  # 秒（与后端一致）
 
 # Golden Set — 基线测试题库（40 题）
 # 设计原则：服务区分散、工具覆盖全、场景多样化
@@ -223,6 +223,65 @@ MULTI_TURN_SCENARIOS = [
             {"question": "跟上个月比呢", "expect_contains": [], "expect_type": None},
             {"question": "全省今天哪里最忙", "expect_contains": [], "expect_type": "C"},
             {"question": "那个最忙的服务区2月营收多少", "expect_contains": [], "expect_type": None},
+        ],
+    },
+
+    # === 新增场景：覆盖更多业务路径 ===
+    {
+        "name": "车流量专项：单SA→日均→排名→同比→换SA",
+        "description": "车流量工具全路径覆盖，验证 get_traffic / get_daily_traffic",
+        "turns": [
+            {"question": "太湖服务区2月车流量", "expect_contains": ["太湖"], "expect_type": "A"},
+            {"question": "日均车流多少", "expect_contains": [], "expect_type": "A"},
+            {"question": "全省车流排名前5", "expect_contains": [], "expect_type": "A"},
+            {"question": "太湖同比变化呢", "expect_contains": [], "expect_type": None},
+            {"question": "巢湖服务区车流呢", "expect_contains": ["巢湖"], "expect_type": "A"},
+        ],
+    },
+    {
+        "name": "合同查询：到期→提成→续约→跨SA→边界",
+        "description": "合同/财务工具全链路，验证 get_contract / get_finance",
+        "turns": [
+            {"question": "宣城服务区合同到期情况", "expect_contains": ["宣城"], "expect_type": "A"},
+            {"question": "提成比例是多少", "expect_contains": [], "expect_type": None},
+            {"question": "快到期的有哪些", "expect_contains": [], "expect_type": None},
+            {"question": "新桥服务区的合同呢", "expect_contains": ["新桥"], "expect_type": "A"},
+            {"question": "全省合同快到期的TOP5", "expect_contains": [], "expect_type": None},
+        ],
+    },
+    {
+        "name": "品牌排名：全省→单SA→门店→亏损→换品牌",
+        "description": "品牌/商户工具全链路，验证 get_brand_ranking / get_merchant_business",
+        "turns": [
+            {"question": "全省品牌排名前10", "expect_contains": [], "expect_type": "A"},
+            {"question": "麦当劳在哪些服务区有门店", "expect_contains": ["麦当劳"], "expect_type": "A"},
+            {"question": "肥东服务区门店情况", "expect_contains": ["肥东"], "expect_type": "A"},
+            {"question": "有亏损的商户吗", "expect_contains": [], "expect_type": "A"},
+            {"question": "瑞幸在哪些服务区有", "expect_contains": [], "expect_type": "A"},
+        ],
+    },
+    {
+        "name": "跨片区深入对比：片区→对比→SA下钻→商户→坪效",
+        "description": "从片区对比到具体SA深挖，验证多工具串联",
+        "turns": [
+            {"question": "皖中片区2月营收多少", "expect_contains": ["皖中"], "expect_type": "A"},
+            {"question": "皖北呢", "expect_contains": ["皖北"], "expect_type": "A"},
+            {"question": "两个片区营收差多少", "expect_contains": [], "expect_type": None},
+            {"question": "皖北最好的服务区是哪个", "expect_contains": [], "expect_type": "A"},
+            {"question": "它的门店有哪些", "expect_contains": [], "expect_type": "A"},
+            {"question": "坪效数据看看", "expect_contains": [], "expect_type": "A"},
+        ],
+    },
+    {
+        "name": "异常边界：超范围→未来→空结果→闲聊→回正轨→模糊",
+        "description": "模拟异常输入和边界条件，验证收口和纠偏能力",
+        "turns": [
+            {"question": "全国服务区营收排名", "expect_contains": [], "expect_type": None},
+            {"question": "明年新桥服务区营收预测", "expect_contains": [], "expect_type": None},
+            {"question": "火星服务区2月营收", "expect_contains": [], "expect_type": None},
+            {"question": "今天心情不好", "expect_contains": [], "expect_type": None},
+            {"question": "算了 新桥服务区2月营收多少", "expect_contains": ["新桥"], "expect_type": "A"},
+            {"question": "那个啥 就是最近表现好的", "expect_contains": [], "expect_type": None},
         ],
     },
 ]
@@ -756,14 +815,16 @@ def main():
         print(f"\n{'='*50}")
         print(f"📊 结果: {summary['total_pass']}/{summary['total_turns']} 通过 ({summary['pass_rate']})")
 
-        # 保存
-        output_path = args.output or f"qa/qa_multi_{run_id}.json"
+        # 保存到 qa/reports/ 目录
+        reports_dir = Path("qa/reports")
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        output_path = args.output or str(reports_dir / f"multi_{run_id}.json")
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         with open(output_path, "w", encoding="utf-8") as f:
             json.dump(summary, f, ensure_ascii=False, indent=2)
         print(f"💾 JSON: {output_path}")
 
-        report_path = args.report or f"qa/qa_multi_report_{run_id}.md"
+        report_path = args.report or str(reports_dir / f"multi_{run_id}.md")
         report = generate_multi_report(summary)
         with open(report_path, "w", encoding="utf-8") as f:
             f.write(report)
@@ -791,13 +852,15 @@ def main():
     print(f"📊 结果: {summary['passed']}/{summary['total']} 通过 ({summary['pass_rate']})")
     print(f"⏱  平均耗时: {summary['avg_elapsed']}s\n")
 
-    output_path = args.output or f"qa/qa_results_{run_id}.json"
+    reports_dir = Path("qa/reports")
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    output_path = args.output or str(reports_dir / f"golden_{run_id}.json")
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(summary, f, ensure_ascii=False, indent=2)
     print(f"💾 JSON: {output_path}")
 
-    report_path = args.report or f"qa/qa_report_{run_id}.md"
+    report_path = args.report or str(reports_dir / f"golden_{run_id}.md")
     report = generate_report(summary)
     with open(report_path, "w", encoding="utf-8") as f:
         f.write(report)
