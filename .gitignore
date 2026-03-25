@@ -2,7 +2,11 @@ node_modules/
 .env
 .patrol/
 
-qa/*.json
+# QA 子项目
 qa/*.db
 qa/__pycache__/
-qa/qa_patrol_*.md
+qa/reports/
+qa/qa_history.jsonl
+
+# 主项目报告
+reports/

@@ -1,17 +1,18 @@
 # Codex Phone
 
-Codex Phone 是一个面向手机浏览器的 Codex 移动控制台。它通过 WebSocket 连接本地 `codex app-server`，把聊天、会话管理、模型切换和工具调用放到手机上使用，并提供 OpenAI 兼容接口。
+Codex Phone 是一个面向手机的 Codex 移动控制台。通过 WebSocket 代理本地 `codex app-server`，集成聊天、会话管理、模型切换、Telegram Bot、OpenAI 兼容接口和 QA 自动巡查系统。
 
 ## 功能列表
 
-- 手机端聊天界面，适合触屏操作
-- 自动启动并代理本地 `codex app-server`
-- 会话管理：新建、恢复、切换历史会话
-- 模型切换：可在页面顶部直接选择模型
-- 语音输入：使用浏览器 Web Speech API
-- OpenAI 兼容接口：`/v1/chat/completions` 和 `/v1/models`
-- PWA 支持：可安装到主屏幕，并支持离线缓存
-- Telegram Bot：支持 `/start`、`/codex`、`/gemini`、`/new`、`/model`、`/quota`
+| 功能 | 说明 |
+|------|------|
+| 📱 手机聊天 | 深色主题 PWA，适配触屏操作 |
+| 🤖 Telegram Bot | 通过 `@yskj02_bot` 聊天、切引擎、执行任务 |
+| 🔌 OpenAI 兼容 | `/v1/chat/completions`，局域网当 OpenAI 用 |
+| 🔮 双引擎 | Codex（GPT-5.4）+ Gemini（CLI 调用） |
+| 🧠 记忆系统 | 自动提取对话要点，跨会话记忆 |
+| 🔄 多账户 | Codex 账户热切换，不用重新登录 |
+| 🔍 QA 自动巡查 | 出题→测试→核对→Codex巡查，三层检测体系 |
 
 ## 快速开始
 
@@ -19,47 +20,66 @@ Codex Phone 是一个面向手机浏览器的 Codex 移动控制台。它通过 
 
 - Node.js 18+
 - 已安装并登录 Codex CLI
-- 手机和运行服务的电脑在同一局域网
+- Python 3.8+（QA 模块）
 
-### 安装依赖
+### 安装与启动
 
 ```bash
 npm install
-```
-
-### 启动服务
-
-```bash
 npm start
-```
-
-或：
-
-```bash
-npm run dev
 ```
 
 默认端口：
 
-- Web 服务：`http://localhost:3002`
-- Codex WS：`ws://127.0.0.1:4002`
+| 服务 | 端口 | 说明 |
+|------|------|------|
+| Web | 3002 | 手机浏览器访问 |
+| Codex WS | 4002 | app-server 内部通信 |
 
-手机浏览器访问电脑局域网 IP，例如 `http://192.168.x.x:3002`。
+### 访问方式
 
-## 使用说明
+- 本地: `http://localhost:3002`
+- 局域网: `http://192.168.x.x:3002`
+- 公网: `https://codex.eshangtech.com` (Nginx 反向代理)
 
-### Web 页面
+## 部署信息
 
-- 点 `+ New` 新建会话
-- 点 `历史` 查看并恢复最近会话
-- 顶部下拉框切换模型
-- 输入框回车发送，`Shift + Enter` 换行
-- 点麦克风按钮启用语音输入
-- 出现安装提示时，可将页面安装为 PWA
+| 项目 | 值 |
+|------|------|
+| 服务器 | `124.220.229.187` (腾讯云) |
+| 域名 | `codex.eshangtech.com` / `852727.xyz` |
+| SSH | `root@codex.eshangtech.com` (密钥认证) |
+| 协议 | HTTPS (Nginx + SSL) |
 
-### OpenAI 兼容接口
+## Telegram Bot
 
-可直接作为局域网内的 OpenAI 兼容服务使用：
+Bot: `@yskj02_bot`，需要配置 `TG_TOKEN` 环境变量。
+
+### 命令列表
+
+| 命令 | 说明 |
+|------|------|
+| `/codex` | 切换到 Codex 引擎 |
+| `/gemini` | 切换到 Gemini 引擎 |
+| `/new` | 新建会话 |
+| `/model` | 查看/切换模型 |
+| `/quota` | 查看额度和账户 |
+| `/memory` | 查看/清空记忆 |
+| `/account` | 多账户管理（list/save/切换） |
+| `/task 描述` | 后台执行 Codex 任务 |
+| `/help` | 帮助信息 |
+
+### 环境变量
+
+```bash
+# .env
+TG_TOKEN=your_telegram_bot_token
+TG_PROXY=http://proxy:port    # 可选，国内访问 Telegram 需要
+```
+
+## OpenAI 兼容接口
+
+局域网内可直接当 OpenAI API 使用：
 
 ```python
 from openai import OpenAI
@@ -73,40 +93,55 @@ response = client.chat.completions.create(
     model="gpt-5.4-mini",
     messages=[{"role": "user", "content": "hello"}],
 )
-
-print(response.choices[0].message.content)
 ```
 
-### Telegram Bot
+## QA 自动巡查系统
 
-如果启用了 `server.js` 中的 Telegram Bot，可以直接在 Telegram 里发送命令：
+独立的 QA 子项目，位于 `qa/` 目录，详见 [qa/README.md](qa/README.md)。
 
-- `/start` 查看命令
-- `/codex` 切换到 Codex
-- `/gemini` 切换到 Gemini
-- `/new` 新建对话
-- `/model` 查看或切换 Codex 模型
-- `/quota` 查看额度
+三层检测体系：
 
-### 额外说明
+| 层级 | 速度 | 能力 |
+|------|------|------|
+| Layer 1 | 秒级 | Python 数字提取 + SQL 对比 |
+| Layer 2 | 分钟级 | 3x Codex 并行幻觉检测 |
+| Layer 3 | 全程 | Pipeline 一键编排 |
 
-- 新建会话时，前端会先读取 `CODEX.md` 作为上下文
-- 如果要对外访问，建议通过局域网 IP、反向代理或隧道暴露 `3002` 端口
+```bash
+# 快速验证
+python qa/qa_pipeline.py --auto-generate --skip-codex --limit-scenarios 2
+
+# 全量 E2E
+python qa/qa_pipeline.py --auto-generate --run-id e2e_01
+```
 
 ## 项目结构
 
 ```text
-.
-├── CODEX.md          # 新会话默认上下文
-├── patrol.js         # 自动巡检/执行脚本
+codex_phone/
+├── server.js            # 主服务：Express + WS代理 + Telegram Bot
+├── patrol.js            # Codex 巡检脚本
+├── CODEX.md             # 新会话上下文（Codex 读取）
+├── system_prompt.md     # 系统人设提示词
+├── .env                 # 环境变量（TG_TOKEN 等）
 ├── package.json
-├── server.js         # Web 服务、WS 代理、OpenAI 兼容 API、Telegram Bot
-├── public/           # 前端 PWA
+├── public/              # 前端 PWA
 │   ├── index.html
 │   ├── css/style.css
 │   ├── js/app.js
 │   ├── sw.js
 │   ├── manifest.json
 │   └── icons/
-└── README.md
+├── .patrol/             # 巡检临时文件
+├── reports/             # 巡检报告输出
+└── qa/                  # QA 自动巡查系统（独立子项目）
+    ├── config.py            # 配置中心
+    ├── qa_pipeline.py       # 一键入口
+    ├── qa_runner.py         # 测试引擎
+    ├── qa_question_gen.py   # 智能出题器
+    ├── qa_auto_check.py     # Layer 1 数字核对
+    ├── qa_codex_dispatch.py # Layer 2 Codex 巡查
+    ├── qa_history.jsonl     # 历史日志
+    ├── dameng_mirror_copy.db# 数据镜像
+    └── reports/             # QA 报告
 ```
