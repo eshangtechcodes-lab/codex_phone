@@ -16,7 +16,8 @@ import TelegramBot from 'node-telegram-bot-api';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // ===== 配置 =====
-const TARGET_DIR = __dirname;
+// patrol.js 在 src/ 目录下，TARGET_DIR 指向项目根
+const TARGET_DIR = dirname(__dirname);
 const PATROL_DIR = join(TARGET_DIR, '.patrol');
 const TG_TOKEN = process.env.TG_TOKEN;
 const TG_CHAT_ID = process.env.TG_CHAT_ID;

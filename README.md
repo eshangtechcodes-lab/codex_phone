@@ -99,14 +99,6 @@ response = client.chat.completions.create(
 
 独立的 QA 子项目，位于 `qa/` 目录，详见 [qa/README.md](qa/README.md)。
 
-三层检测体系：
-
-| 层级 | 速度 | 能力 |
-|------|------|------|
-| Layer 1 | 秒级 | Python 数字提取 + SQL 对比 |
-| Layer 2 | 分钟级 | 3x Codex 并行幻觉检测 |
-| Layer 3 | 全程 | Pipeline 一键编排 |
-
 ```bash
 # 快速验证
 python qa/qa_pipeline.py --auto-generate --skip-codex --limit-scenarios 2
@@ -115,16 +107,40 @@ python qa/qa_pipeline.py --auto-generate --skip-codex --limit-scenarios 2
 python qa/qa_pipeline.py --auto-generate --run-id e2e_01
 ```
 
+## 数据审核工具集
+
+独立的数据同步与审计工具，位于 `data_audit/` 目录，详见 [data_audit/README.md](data_audit/README.md)。
+
+```bash
+# 数据库诊断
+python data_audit/sync/sync_mirror.py
+
+# 5 层健康校验
+python data_audit/audit/data_health_check.py
+```
+
 ## 项目结构
 
 ```text
 codex_phone/
-├── server.js            # 主服务：Express + WS代理 + Telegram Bot
-├── patrol.js            # Codex 巡检脚本
-├── CODEX.md             # 新会话上下文（Codex 读取）
-├── system_prompt.md     # 系统人设提示词
-├── .env                 # 环境变量（TG_TOKEN 等）
+├── server.js            # 主入口（组装模块 + 启动服务）
+├── CODEX.md             # Codex 会话上下文
 ├── package.json
+├── .env                 # 环境变量
+├── config/              # 配置文件
+│   ├── system_prompt.md     # AI 人设提示词
+│   └── .env.example         # 环境变量模板
+├── src/                 # 后端模块
+│   ├── codex.js             # Codex 进程管理 + WS 代理
+│   ├── api.js               # OpenAI 兼容 REST API
+│   ├── memory.js            # 记忆系统
+│   ├── gemini.js            # Gemini CLI 调用
+│   ├── patrol.js            # Codex 巡检脚本
+│   └── telegram/            # Telegram Bot
+│       ├── index.js             # Bot 初始化 + 消息路由
+│       ├── commands.js          # 基础命令
+│       ├── qa.js                # /qa 巡检集成
+│       └── task.js              # /task 后台任务
 ├── public/              # 前端 PWA
 │   ├── index.html
 │   ├── css/style.css
@@ -132,16 +148,18 @@ codex_phone/
 │   ├── sw.js
 │   ├── manifest.json
 │   └── icons/
-├── .patrol/             # 巡检临时文件
-├── reports/             # 巡检报告输出
-└── qa/                  # QA 自动巡查系统（独立子项目）
-    ├── config.py            # 配置中心
-    ├── qa_pipeline.py       # 一键入口
-    ├── qa_runner.py         # 测试引擎
-    ├── qa_question_gen.py   # 智能出题器
-    ├── qa_auto_check.py     # Layer 1 数字核对
-    ├── qa_codex_dispatch.py # Layer 2 Codex 巡查
-    ├── qa_history.jsonl     # 历史日志
-    ├── dameng_mirror_copy.db# 数据镜像
-    └── reports/             # QA 报告
+├── qa/                  # QA 自动巡查系统
+│   ├── config.py
+│   ├── qa_pipeline.py
+│   ├── qa_runner.py
+│   ├── qa_question_gen.py
+│   ├── qa_auto_check.py
+│   ├── qa_codex_dispatch.py
+│   └── reports/
+└── data_audit/          # 数据同步与审计工具集
+    ├── config.py
+    ├── sync/
+    ├── audit/
+    ├── data/
+    └── docs/
 ```

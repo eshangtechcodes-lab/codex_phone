@@ -10,3 +10,7 @@ qa/qa_history.jsonl
 
 # 主项目报告
 reports/
+
+# Data Audit（大文件不入库）
+data_audit/data/*.db
+data_audit/data/*.db-*

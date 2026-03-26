@@ -15,8 +15,15 @@ _IS_WINDOWS = platform.system() == "Windows"
 # QA 项目根目录
 QA_DIR = Path(__file__).parent
 
-# 数据库路径（统一使用 AI-Python 主项目的镜像库，避免副本过时）
-DB_PATH = str(Path("D:/AISpace/AI-Python/data/dameng_mirror.db") if _IS_WINDOWS else (QA_DIR / "dameng_mirror.db"))
+# 数据库路径：优先使用本地 data_audit 的独立副本，fallback 到 AI-Python
+_DATA_AUDIT_DB = QA_DIR.parent / "data_audit" / "data" / "dameng_mirror.db"
+_AI_PYTHON_DB = Path("D:/AISpace/AI-Python/data/dameng_mirror.db")
+if _DATA_AUDIT_DB.exists():
+    DB_PATH = str(_DATA_AUDIT_DB)
+elif _IS_WINDOWS and _AI_PYTHON_DB.exists():
+    DB_PATH = str(_AI_PYTHON_DB)
+else:
+    DB_PATH = str(QA_DIR / "dameng_mirror.db")
 
 # 报告输出目录
 REPORTS_DIR = QA_DIR / "reports"
@@ -42,8 +49,9 @@ TIMEOUT = 120  # 秒
 # Codex 工作目录（跑 Codex CLI 时的 cwd）
 CODEX_CWD = str(QA_DIR.parent)  # codex_phone 根目录
 
-# Codex 需要访问的外部数据目录
-CODEX_DATA_DIR = "D:/AISpace/AI-Python/data" if _IS_WINDOWS else str(QA_DIR)
+# Codex 需要访问的数据目录（优先本地 data_audit）
+_LOCAL_DATA_DIR = QA_DIR.parent / "data_audit" / "data"
+CODEX_DATA_DIR = str(_LOCAL_DATA_DIR if _LOCAL_DATA_DIR.exists() else (Path("D:/AISpace/AI-Python/data") if _IS_WINDOWS else QA_DIR))
 
 # ============================================================
 # 测试配置
