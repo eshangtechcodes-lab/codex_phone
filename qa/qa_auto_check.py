@@ -30,6 +30,73 @@ from config import DB_PATH, REPORTS_DIR
 
 
 # ============================================================
+# 0. 业务常识 + 配置表（数据驱动，修改配置即可扩展，不改逻辑代码）
+# ============================================================
+
+# 指标关键词映射：关键词 → metric 类型
+# 顺序重要：长关键词优先匹配（如"业主营业收入"优先于"营业收入"）
+# 来源: revenue.py L43, unified_revenue_ranking.py L31, shared.py
+METRIC_KEYWORDS = [
+    # (关键词列表, metric 类型, 说明)
+    # —— 业主口径（必须在对客之前，因为"业主营业收入"包含"营业收入"）
+    (['业主营业收入', '业主收入', '业主入账', '除税收入', '除税'],
+     'owner_revenue', '业主营业收入（除税），独立指标，不等于对客销售'),
+    # —— 对客销售口径（营业收入=营收=对客销售=营业额，系统同义词）
+    (['营收', '对客销售', '营业收入', '营业额', '营业金额', '赚钱', '经营'],
+     'revenue', '对客销售，与营业收入/营收/营业额完全同义'),
+    # —— 车流
+    (['车流', '入区', '断面', '流量'],
+     'traffic', '车流量相关指标'),
+    # —— 利润
+    (['利润', '亏损', '盈利', '盈亏'],
+     'profit', '商户/门店利润'),
+    # —— 排名
+    (['排名', '前5', '前10', '最高', '最低', '垫底', '第几'],
+     'ranking', '排名类问题'),
+]
+
+# 偏差阈值配置：每个字段的 warning/critical 阈值
+# mode: 'pct'=百分比偏差, 'abs'=绝对值偏差
+DEVIATION_THRESHOLDS = {
+    'revenue_wan':       {'mode': 'pct', 'warning': 1,  'critical': 5,  'label': '营收(万)'},
+    'owner_revenue_wan': {'mode': 'pct', 'warning': 1,  'critical': 5,  'label': '业主营收(万)'},
+    'yoy_pct':           {'mode': 'abs', 'warning': 1,  'critical': 5,  'label': '同比(%)'},
+    'owner_yoy_pct':     {'mode': 'abs', 'warning': 1,  'critical': 5,  'label': '业主同比(%)'},
+    'mom_pct':           {'mode': 'abs', 'warning': 1,  'critical': 5,  'label': '环比(%)'},
+    'rank':              {'mode': 'abs', 'warning': 3,  'critical': 10, 'label': '排名'},
+    'section_flow_wan':  {'mode': 'pct', 'warning': 3,  'critical': 10, 'label': '断面车流(万)'},
+    'entry_flow_wan':    {'mode': 'pct', 'warning': 3,  'critical': 10, 'label': '入区车流(万)'},
+    'entry_rate':        {'mode': 'abs', 'warning': 1,  'critical': 5,  'label': '入区率(%)'},
+    'traffic_wan':       {'mode': 'pct', 'warning': 3,  'critical': 10, 'label': '车流(万)'},
+    'profit_wan':        {'mode': 'pct', 'warning': 3,  'critical': 10, 'label': '利润(万)'},
+}
+
+# 口径过滤规则：不同 metric 下应排除哪些 DB 字段（避免交叉口径对比）
+CALIBER_FILTERS = {
+    'owner_revenue': {'exclude': ['revenue_wan', 'yoy_pct', 'mom_pct', 'rank']},
+    'default':       {'exclude': ['owner_revenue_wan', 'owner_yoy_pct']},
+}
+
+# 业务领域规则（供 Codex 巡查 prompt 引用）
+DOMAIN_RULES = {
+    'synonym_groups': [
+        {'names': ['营收', '营业收入', '营业额', '营业金额', '对客销售'],
+         'metric': 'revenue', 'db_field': 'revenue_wan',
+         'note': '在驿达系统中，营业收入=营收=对客销售=营业额，是同一指标'},
+        {'names': ['业主营业收入', '业主收入', '业主入账', '除税收入'],
+         'metric': 'owner_revenue', 'db_field': 'owner_revenue_wan',
+         'note': '业主营业收入（除税）是独立指标，不等于对客销售'},
+    ],
+    'non_ranking_entities': ['城市店及商城', '汽修厂', '实验室', '餐饮公司',
+                             '皖通高速产业园', '线上商城'],
+    'normal_patterns': [
+        '自营门店占比低是正常行业规律（联营为主流经营模式）',
+        '"去年"字段指去年同期，不是去年全年',
+    ],
+}
+
+
+# ============================================================
 # 1. 数字提取器
 # ============================================================
 
@@ -68,10 +135,18 @@ def extract_numbers(text: str) -> dict:
             mom_val = -mom_val
         result['mom_pct'] = mom_val
 
-    # 提取排名: "第X位" 或 "第X名" 或 "排名第X" 或 "排名X"
-    rank_match = re.search(r'(?:排名)?第\s*(\d+)\s*[位名]', text)
-    if rank_match:
-        result['rank'] = int(rank_match.group(1))
+    # 提取排名：优先匹配营收/全省排名上下文，避免误取车流排名
+    rank_patterns = [
+        r'全省排名第\s*(\d+)',
+        r'(?:营收|对客销售|营业收入)排名[^\d]*第?\s*(\d+)',
+        r'排名第\s*(\d+)\s*[位名/]',
+        r'第\s*(\d+)\s*[位名]',
+    ]
+    for pattern in rank_patterns:
+        rank_match = re.search(pattern, text)
+        if rank_match:
+            result['rank'] = int(rank_match.group(1))
+            break
 
     # 提取车流: "XX万辆"
     flow_matches = re.findall(r'(\d[\d,]*\.?\d*)\s*万\s*辆', text)
@@ -138,23 +213,19 @@ def identify_query_context(question: str, answer_text: str = '') -> dict:
             ctx['month'] = f"2026{month:02d}"
             ctx['month_from_answer'] = True
 
-    # 识别指标类型（同时检查问题和回答）
-    if any(kw in question for kw in ['营收', '对客销售', '营业收入', '赚钱', '经营']):
-        ctx['metric'] = 'revenue'
-    elif any(kw in question for kw in ['车流', '入区', '断面', '流量']):
-        ctx['metric'] = 'traffic'
-    elif any(kw in question for kw in ['利润', '亏损', '盈利', '盈亏']):
-        ctx['metric'] = 'profit'
-    elif any(kw in question for kw in ['业主', '除税']):
-        ctx['metric'] = 'owner_revenue'
-    elif any(kw in question for kw in ['排名', '前5', '前10', '最高', '最低']):
-        ctx['metric'] = 'ranking'
-    # 如果问题没有关键词，从回答推断
-    elif answer_text:
-        if any(kw in answer_text[:300] for kw in ['对客销售', '营收', '营业收入']):
-            ctx['metric'] = 'revenue'
-        elif any(kw in answer_text[:300] for kw in ['断面', '入区', '车流']):
-            ctx['metric'] = 'traffic'
+    # 识别指标类型（数据驱动：遍历 METRIC_KEYWORDS 配置表）
+    # METRIC_KEYWORDS 已按优先级排序（长关键词在前），首次匹配即停止
+    for keywords, metric, _note in METRIC_KEYWORDS:
+        if any(kw in question for kw in keywords):
+            ctx['metric'] = metric
+            break
+    else:
+        # 问题没匹配到，从回答前 300 字推断
+        if answer_text:
+            for keywords, metric, _note in METRIC_KEYWORDS:
+                if any(kw in answer_text[:300] for kw in keywords):
+                    ctx['metric'] = metric
+                    break
 
     return ctx
 
@@ -238,23 +309,29 @@ def query_db_truth(ctx: dict, db_path: str) -> dict:
                     except (ValueError, TypeError):
                         pass
 
-            # 排名：遍历所有 children 按对客销售排序
+            # 排名：遍历 children 按对客销售排序（过滤非高速实体，与 AI 口径对齐）
             if children:
+                non_ranking = set(DOMAIN_RULES.get('non_ranking_entities', []))
                 sa_revenues = []
                 for child in children:
                     sc = _get_sales_compare(child)
                     name = child.get("服务区名称", "")
                     raw = sc.get("本年")
-                    if name and raw is not None:
-                        try:
-                            sa_revenues.append((name, float(raw)))
-                        except (ValueError, TypeError):
-                            pass
+                    if not name or raw is None:
+                        continue
+                    # 过滤非排名实体（城市店/汽修厂/实验室等）
+                    if any(excl in name for excl in non_ranking):
+                        continue
+                    try:
+                        sa_revenues.append((name, float(raw)))
+                    except (ValueError, TypeError):
+                        pass
                 # 按营收降序排名
                 sa_revenues.sort(key=lambda x: x[1], reverse=True)
                 for rank, (name, _) in enumerate(sa_revenues, 1):
                     if name == sa_name:
                         truth['rank'] = rank
+                        truth['rank_total'] = len(sa_revenues)
                         break
 
             # 车流：与模型同源，从 NEWGETMONTHINCANALYSIS 的入区车流数据对比读取
@@ -353,95 +430,55 @@ def query_db_truth(ctx: dict, db_path: str) -> dict:
 # 3. 偏差计算
 # ============================================================
 
+def _calc_severity(diff: float, threshold: dict) -> str:
+    """根据配置表计算偏差严重级别"""
+    if diff > threshold['critical']:
+        return 'critical'
+    elif diff > threshold['warning']:
+        return 'warning'
+    return 'ok'
+
+
 def check_deviation(ai_nums: dict, db_truth: dict) -> list:
-    """对比 AI 数字和 DB 真实值，返回偏差列表（增强版：支持车流、入区率）"""
+    """对比 AI 数字和 DB 真实值，返回偏差列表（数据驱动版：读 DEVIATION_THRESHOLDS 配置）"""
     deviations = []
 
-    # 营收对比
-    if 'revenue_wan' in ai_nums and 'revenue_wan' in db_truth:
-        ai_val = ai_nums['revenue_wan']
-        db_val = db_truth['revenue_wan']
+    # 业主口径特殊映射：AI 提取的 revenue_wan 实际对应 DB 的 owner_revenue_wan
+    ai_field_map = {
+        'owner_revenue_wan': 'revenue_wan',   # AI 的万元数字 → DB 的 owner 字段
+        'owner_yoy_pct': 'yoy_pct',          # AI 的同比数字 → DB 的 owner 同比
+    }
+
+    for field, threshold in DEVIATION_THRESHOLDS.items():
+        # AI 字段可能有别名（业主口径映射）
+        ai_field = ai_field_map.get(field, field)
+        if ai_field not in ai_nums or field not in db_truth:
+            continue
+
+        ai_val = ai_nums[ai_field]
+        db_val = db_truth[field]
+        if db_val is None:
+            continue
+
         diff = abs(ai_val - db_val)
-        pct = round(diff / db_val * 100, 2) if db_val > 0 else 0
+
+        # 根据 mode 计算偏差值
+        if threshold['mode'] == 'pct':
+            if db_val == 0:
+                continue  # 分母为 0 跳过
+            diff_for_severity = round(diff / abs(db_val) * 100, 2)
+        else:  # abs
+            diff_for_severity = diff
+
+        severity = _calc_severity(diff_for_severity, threshold)
+
         deviations.append({
-            'field': 'revenue_wan',
+            'field': field,
+            'label': threshold.get('label', field),
             'ai': ai_val, 'db': db_val,
-            'diff': round(diff, 2), 'diff_pct': pct,
-            'severity': 'critical' if pct > 5 else ('warning' if pct > 1 else 'ok'),
-        })
-
-    # 同比对比
-    if 'yoy_pct' in ai_nums and 'yoy_pct' in db_truth:
-        ai_val = ai_nums['yoy_pct']
-        db_val = db_truth['yoy_pct']
-        diff = abs(ai_val - db_val)
-        deviations.append({
-            'field': 'yoy_pct',
-            'ai': ai_val, 'db': db_val,
-            'diff': round(diff, 2), 'diff_pct': round(diff, 2),
-            'severity': 'critical' if diff > 5 else ('warning' if diff > 1 else 'ok'),
-        })
-
-    # 环比对比
-    if 'mom_pct' in ai_nums and 'mom_pct' in db_truth:
-        ai_val = ai_nums['mom_pct']
-        db_val = db_truth['mom_pct']
-        diff = abs(ai_val - db_val)
-        deviations.append({
-            'field': 'mom_pct',
-            'ai': ai_val, 'db': db_val,
-            'diff': round(diff, 2), 'diff_pct': round(diff, 2),
-            'severity': 'critical' if diff > 5 else ('warning' if diff > 1 else 'ok'),
-        })
-
-    # 排名对比
-    if 'rank' in ai_nums and 'rank' in db_truth:
-        ai_val = ai_nums['rank']
-        db_val = db_truth['rank']
-        diff = abs(ai_val - db_val)
-        deviations.append({
-            'field': 'rank',
-            'ai': ai_val, 'db': db_val, 'diff': diff,
-            'severity': 'critical' if diff > 3 else ('warning' if diff > 0 else 'ok'),
-        })
-
-    # 断面车流对比（万单位）
-    if 'section_flow_wan' in ai_nums and 'section_flow_wan' in db_truth:
-        ai_val = ai_nums['section_flow_wan']
-        db_val = db_truth['section_flow_wan']
-        if db_val:
-            diff = abs(ai_val - db_val)
-            pct = round(diff / db_val * 100, 2) if db_val > 0 else 0
-            deviations.append({
-                'field': 'section_flow_wan',
-                'ai': ai_val, 'db': db_val,
-                'diff': round(diff, 2), 'diff_pct': pct,
-                'severity': 'critical' if pct > 10 else ('warning' if pct > 3 else 'ok'),
-            })
-
-    # 入区车流对比（万单位）
-    if 'entry_flow_wan' in ai_nums and 'entry_flow_wan' in db_truth:
-        ai_val = ai_nums['entry_flow_wan']
-        db_val = db_truth['entry_flow_wan']
-        if db_val:
-            diff = abs(ai_val - db_val)
-            pct = round(diff / db_val * 100, 2) if db_val > 0 else 0
-            deviations.append({
-                'field': 'entry_flow_wan',
-                'ai': ai_val, 'db': db_val,
-                'diff': round(diff, 2), 'diff_pct': pct,
-                'severity': 'critical' if pct > 10 else ('warning' if pct > 3 else 'ok'),
-            })
-
-    # 入区率对比
-    if 'entry_rate' in ai_nums and 'entry_rate' in db_truth:
-        ai_val = ai_nums['entry_rate']
-        db_val = db_truth['entry_rate']
-        diff = abs(ai_val - db_val)
-        deviations.append({
-            'field': 'entry_rate',
-            'ai': ai_val, 'db': db_val, 'diff': round(diff, 2),
-            'severity': 'critical' if diff > 5 else ('warning' if diff > 1 else 'ok'),
+            'diff': round(diff, 2),
+            'diff_pct': diff_for_severity if threshold['mode'] == 'pct' else round(diff, 2),
+            'severity': severity,
         })
 
     return deviations
@@ -580,6 +617,10 @@ def auto_check(report_path: str, db_path: str) -> dict:
             'turns': [],
         }
 
+        # 多轮 SA 继承：追问时如果没有提到服务区，沿用上一轮的 SA
+        last_sa = None
+        last_month = None
+
         for turn in scenario.get('turns', []):
             stats['total_turns'] += 1
             text = turn.get('full_response') or turn.get('report_preview', '')
@@ -600,16 +641,41 @@ def auto_check(report_path: str, db_path: str) -> dict:
                     turn['expected_type'] == turn['actual_type']
                 )
 
-            # 数字提取 + SQL 核对（增强：将回答文本传入上下文识别）
+            # 数字提取 + SQL 核对（支持多轮 SA 继承）
             ctx = identify_query_context(question, text)
+
+            # SA 继承：当前轮没有 SA 但前轮有 → 沿用
+            if not ctx.get('service_area') and last_sa:
+                ctx['service_area'] = last_sa
+                ctx['sa_inherited'] = True  # 标记为继承
+
+            # 月份继承：同理
+            if not ctx.get('month') and last_month:
+                ctx['month'] = last_month
+                ctx['month_inherited'] = True
+
+            # 更新 last_sa / last_month（显式提到的优先）
+            if ctx.get('service_area') and not ctx.get('sa_inherited'):
+                last_sa = ctx['service_area']
+            if ctx.get('month') and not ctx.get('month_inherited'):
+                last_month = ctx['month']
+
             ai_nums = extract_numbers(text) if text else {}
             db_truth = query_db_truth(ctx, db_path) if ctx.get('service_area') else {}
 
+            # 口径对齐：根据 metric 类型，用 CALIBER_FILTERS 配置过滤 DB 字段
+            metric = ctx.get('metric', 'default')
+            filter_cfg = CALIBER_FILTERS.get(metric, CALIBER_FILTERS.get('default', {}))
+            exclude_fields = filter_cfg.get('exclude', [])
+            db_truth_filtered = {k: v for k, v in db_truth.items()
+                                 if k not in exclude_fields} if db_truth else {}
+
             turn_check['ai_numbers'] = ai_nums
             turn_check['db_truth'] = db_truth
+            turn_check['context'] = ctx  # 保存上下文供调试
 
-            if ai_nums and db_truth:
-                deviations = check_deviation(ai_nums, db_truth)
+            if ai_nums and db_truth_filtered:
+                deviations = check_deviation(ai_nums, db_truth_filtered)
                 turn_check['deviations'] = deviations
                 stats['checked_turns'] += 1
 

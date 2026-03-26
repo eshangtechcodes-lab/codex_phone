@@ -38,6 +38,27 @@ CODEX_CMD = [
 # 巡查任务 Prompt 模板
 PATROL_PROMPT_TEMPLATE = """你是 QA 巡查 AI。请对以下场景做幻觉检测和回答质量评分。
 
+## 业务常识（评分时必须遵守）
+
+以下是驿达系统已确认的业务口径规则，评分时不应将符合规则的回答判为错误：
+
+### 口径同义映射
+| 用户说法 | 系统含义 | 关系 |
+|---------|---------|------|
+| 营收/营业收入/营业额/营业金额 | 对客销售 | **完全同义**（数字应完全一致） |
+| 业主营业收入/业主收入/业主入账 | 业主营业收入（除税） | **不同于对客销售**（数字不同） |
+
+⚠️ 当用户问"营业收入"而 AI 回答"对客销售"并给出同一数字时，这是**正确的**，不应判为 ENTITY_MISMATCH。
+⚠️ 但当用户问"业主营业收入"而 AI 回答"对客销售"数字时，这是**错误的**。
+
+### 实体分类
+- 133 对高速服务区：归属五大管理中心（皖中/皖东/皖南/皖西/皖北），参与排名
+- 城市店/商城/实验室/餐饮公司等：不参与服务区排名，不混入片区统计
+
+### 行业常识
+- 自营门店占比低是**正常**行业规律（联营为高速服务区主流模式），不应判为异常
+- 数据中"去年"字段指**去年同期**（同月/同时段），不是去年全年
+
 ## 检查规则
 
 对每一轮，评估以下维度并打分 (1-5):
@@ -145,17 +166,22 @@ def generate_task_file(
 
 
 def launch_codex(prompt: str, cwd: str) -> subprocess.Popen:
-    """启动一个 Codex CLI 进程"""
-    cmd = CODEX_CMD + [prompt]
+    """启动一个 Codex CLI 进程（通过 stdin 传入 prompt 以避免命令行长度限制）"""
+    cmd = CODEX_CMD + ["-"]  # "-" 表示从 stdin 读取 prompt
     proc = subprocess.Popen(
         cmd,
         cwd=cwd,
+        stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
         encoding='utf-8',
         errors='replace',
+        shell=True,  # Windows 上需要 shell=True 才能找到 npm 全局 .cmd 命令
     )
+    # 写入 prompt 到 stdin 并关闭，让 Codex 开始执行
+    proc.stdin.write(prompt)
+    proc.stdin.close()
     return proc
 
 

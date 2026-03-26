@@ -670,12 +670,14 @@ def generate_multi_report(summary: dict) -> str:
 
 
 def main():
+    global API_URL, LLM_MODE
+
     parser = argparse.ArgumentParser(description="QA 测试运行器")
     parser.add_argument("--questions", nargs="+", help="指定测试问题列表")
     parser.add_argument("--questions-file", help="外部题目 JSON 文件（qa_question_gen 生成）")
     parser.add_argument("--output", help="JSON 结果输出路径")
     parser.add_argument("--report", help="Markdown 报告输出路径")
-    parser.add_argument("--api-url", default=API_URL, help="API 地址")
+    parser.add_argument("--api-url", default=None, help="API 地址")
     parser.add_argument("--run-id", help="批次 ID（默认自动生成）")
     parser.add_argument("--limit", type=int, help="限制测试题数/场景数")
     parser.add_argument("--multi-turn", action="store_true",
@@ -685,8 +687,7 @@ def main():
     args = parser.parse_args()
 
     # 覆盖全局配置
-    global API_URL, LLM_MODE
-    if args.api_url != API_URL:
+    if args.api_url:
         API_URL = args.api_url
     if args.llm_mode:
         LLM_MODE = args.llm_mode
