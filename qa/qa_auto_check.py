@@ -111,12 +111,17 @@ def extract_numbers(text: str) -> dict:
         result['all_revenue_wan'] = [float(m.replace(',', '')) for m in revenue_matches]
 
     # 提取 "XXX元"（不带万，如 "2,590,304.35 元"），转换为万元
+    # 修复：取最大值（营收总额 ≥ 增长金额），避免把同比增量误当营收
     if 'revenue_wan' not in result:
         raw_yuan = re.findall(r'(\d[\d,]*\.?\d*)\s*元(?![/㎡])', text)
         if raw_yuan:
-            val = float(raw_yuan[0].replace(',', ''))
-            if val > 10000:  # 超过1万才视为营收数字
-                result['revenue_wan'] = round(val / 10000, 2)
+            candidates = []
+            for m in raw_yuan:
+                val = float(m.replace(',', ''))
+                if val > 10000:  # 超过1万才视为营收数字
+                    candidates.append(val)
+            if candidates:
+                result['revenue_wan'] = round(max(candidates) / 10000, 2)
 
     # 提取同比百分比: "同比 +XX.XX%" 或 "同比增长XX.XX%" 或 "同比下降XX%"
     yoy_match = re.search(r'同比\s*[增长降下]*\s*([+-]?\s*\d+\.?\d*)\s*%', text)
@@ -189,11 +194,15 @@ def identify_query_context(question: str, answer_text: str = '') -> dict:
     if sa_match:
         ctx['service_area'] = sa_match.group(1)
     # 回答中也可能提到服务区名（追问场景下问题没有 SA 但回答有）
+    # 修复：过滤非标准 SA 名（如"日安徽驿达高速服务区"），避免识别错误导致 DB 查不到
+    INVALID_SA_KEYWORDS = ['省', '全省', '高速公路', '管理中心', '片区', '公司']
     if not ctx.get('service_area') and answer_text:
         sa_match2 = re.search(r'([\u4e00-\u9fa5]{2,8}服务区)', answer_text)
         if sa_match2:
-            ctx['service_area'] = sa_match2.group(1)
-            ctx['sa_from_answer'] = True
+            sa_candidate = sa_match2.group(1)
+            if not any(kw in sa_candidate for kw in INVALID_SA_KEYWORDS):
+                ctx['service_area'] = sa_candidate
+                ctx['sa_from_answer'] = True
 
     # 识别片区
     region_match = re.search(r'(皖[中南北东西])', question)
@@ -596,7 +605,69 @@ def scan_thinking_chain(diagnostics: dict, question: str) -> list:
 
 
 # ============================================================
-# 6. 主流程
+# 6. 反查/复核机制
+# ============================================================
+
+def cross_verify_critical(scenario_turns: list, turn_idx: int, db_truth: dict) -> list:
+    """反查机制：critical 偏差被检测到后，交叉验证是否为提取器误报
+
+    策略：
+    1. 全文多值扫描 — DB 值是否出现在 AI 回答原文中（可能是提取器选错了数字）
+    2. 后续轮参照 — 同场景后续轮次有无与 DB 吻合的值
+    """
+    turn = scenario_turns[turn_idx]
+    text = turn.get('full_response') or turn.get('report_preview', '')
+    corrections = []
+
+    for dev in turn.get('deviations', []):
+        if dev['severity'] != 'critical':
+            continue
+        db_val = dev['db']
+        corrected = False
+
+        # 反查1: 全文扫描 — DB 值是否出现在 AI 回答中
+        if text:
+            all_numbers = re.findall(r'(\d[\d,]*\.?\d*)', text)
+            all_floats = set()
+            for n in all_numbers:
+                try:
+                    v = float(n.replace(',', ''))
+                    all_floats.add(round(v / 10000, 2))  # 元→万
+                    all_floats.add(round(v, 2))            # 万元直取
+                except ValueError:
+                    pass
+
+            if db_val in all_floats:
+                corrections.append({
+                    'field': dev['field'],
+                    'reason': 'db_value_found_in_text',
+                    'wrong_extract': dev['ai'],
+                    'correct_value': db_val,
+                })
+                corrected = True
+
+        # 反查2: 后续轮参照 — 同场景后续轮有无匹配值
+        if not corrected:
+            for later in scenario_turns[turn_idx + 1:]:
+                later_nums = later.get('ai_numbers', {})
+                for v in later_nums.values():
+                    if isinstance(v, (int, float)) and abs(v - db_val) < 0.01:
+                        corrections.append({
+                            'field': dev['field'],
+                            'reason': f'matched_in_turn_{later["turn"]}',
+                            'wrong_extract': dev['ai'],
+                            'correct_value': db_val,
+                        })
+                        corrected = True
+                        break
+                if corrected:
+                    break
+
+    return corrections
+
+
+# ============================================================
+# 7. 主流程
 # ============================================================
 
 def auto_check(report_path: str, db_path: str) -> dict:
@@ -704,6 +775,33 @@ def auto_check(report_path: str, db_path: str) -> dict:
             scenario_result['turns'].append(turn_check)
 
         results.append(scenario_result)
+
+    # 反查：对 critical 偏差做交叉验证，降级误报
+    for scenario_result in results:
+        for i, turn_chk in enumerate(scenario_result['turns']):
+            if turn_chk.get('max_severity') == 'critical':
+                corrections = cross_verify_critical(
+                    scenario_result['turns'], i, turn_chk.get('db_truth', {}))
+                if corrections:
+                    turn_chk['cross_verified'] = True
+                    turn_chk['corrections'] = corrections
+                    # 降级被修正的偏差
+                    for dev in turn_chk['deviations']:
+                        for c in corrections:
+                            if dev['field'] == c['field']:
+                                dev['original_severity'] = dev['severity']
+                                dev['severity'] = 'ok'
+                                dev['ai'] = c['correct_value']
+                                dev['cross_verify_note'] = c['reason']
+                    # 重新计算 max_severity
+                    remaining = [d['severity'] for d in turn_chk['deviations']]
+                    new_sev = ('critical' if 'critical' in remaining
+                               else 'warning' if 'warning' in remaining
+                               else 'ok')
+                    if new_sev != 'critical':
+                        stats['critical'] -= 1
+                        stats[new_sev] += 1
+                    turn_chk['max_severity'] = new_sev
 
     return {
         'type': 'auto_check',
